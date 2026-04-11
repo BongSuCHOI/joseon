@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.DS_Store
+
+# Harness 런타임 데이터
+~/.config/opencode/harness/

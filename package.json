@@ -1,0 +1,20 @@
+{
+  "name": "my-harness",
+  "version": "0.1.0",
+  "description": "OpenCode plugin-based harness + orchestration system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  },
+  "files": [
+    "dist"
+  ]
+}
