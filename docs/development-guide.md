@@ -25,6 +25,12 @@
     └── improver.ts       # Step 2 추가: L5 자가개선 + L6 폐루프
 ```
 
+**Step 3 추가 사항:**
+- `shared/utils.ts`에 `rotateHistoryIfNeeded()` 추가 (history.jsonl 로테이션)
+- `ensureHarnessDirs()`에 `memory/facts/`, `memory/archive/` 추가
+- `harness/improver.ts`에 `syncRulesMarkdown()`, `indexSessionFacts()`, `searchFacts()` 추가
+- `.opencode/rules/`에 `harness-soft-rules.md`, `harness-hard-rules.md` 자동 생성/갱신
+
 **핵심 규칙:**
 - `package.json`에 `"type": "module"` 필수
 - `index.ts`는 `export default { id, server() }` 패턴 사용
@@ -388,3 +394,18 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-11 | Step 2 | L6 실동작 (tmux) | ✅ | violation_count=2 → HARD 승격 + 카운터 리셋 + promoted_at 기록 |
 | 2026-04-11 | Step 2 | HARD 차단 실동작 (tmux) | ✅ | 승격된 규칙으로 bash 명령 차단 [HARNESS HARD BLOCK] |
 | 2026-04-11 | Step 2 | session.created 타임스탬프 | ✅ | session_start_{key}.json에 timestamp+sessionID 기록 확인 |
+| 2026-04-12 | Step 3 | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-12 | Step 3 | smoke test (25/25) | ✅ | rotateHistoryIfNeeded, syncRulesMarkdown, Memory Index/Search, fix: 커밋 파싱, history 로테이션 |
+| 2026-04-12 | Step 3 | .opencode/rules/ 마크다운 실동작 | ✅ | SOFT 규칙 생성 시 harness-soft-rules.md 자동 갱신, OpenCode가 세션 시작부터 읽음 |
+| 2026-04-12 | Step 3 | Signal → SOFT 규칙 실동작 (tmux) | ✅ | pending signal → ack 이동 + SOFT 규칙 생성 + history 기록 + state 갱신 |
+| 2026-04-12 | Step 3 | fix: 커밋 파싱 (COMMIT_START delimiter) | ✅ | 기존 ||| 파싱 → COMMIT_START delimiter로 개선, 스모크 테스트 2개 fix 커밋 정상 파싱 |
+| 2026-04-12 | Step 3 | history.jsonl 로테이션 실동작 | ✅ | 1MB 초과 시 자동 로테이션 확인 |
+| 2026-04-12 | Step 3 | Memory Index (indexSessionFacts) | ✅ | 스모크: 6개 키워드 추출 + facts 저장 확인. 실동작: observer가 이벤트만 로깅하여 대화 내용 미포함 (설계적 특성) |
+| 2026-04-12 | Step 3 | Memory Search (searchFacts) | ✅ | 키워드 매칭 + 점수 정렬 + 최대 10개 제한 확인 |
+| 2026-04-12 | Step 3 | Compacting 컨텍스트 (Memory 주입) | ✅ | [HARNESS MEMORY — past decisions] 섹션 주입 코드 구현 |
+| 2026-04-12 | Step 3 | #8 scope:prompt 효과 측정 | ✅ | types.ts에 'unmeasurable' 추가, evaluateRuleEffectiveness에서 prompt scope 조기 분기 |
+| 2026-04-12 | Step 3 | #1 Race Condition 방지 | ✅ | signalToRule()에서 write 직전 existsSync 재확인 (TOCTOU 완화) |
+| 2026-04-12 | Step 3 | #5 Regex Backtracking 방지 | ✅ | safeRegexTest에 target 길이 10000자 제한 (improver + enforcer 양쪽) |
+| 2026-04-12 | Step 3 | #6 Command Injection 방지 | ✅ | detectFixCommits에서 ISO_DATE_REGEX로 timestamp 검증 후 git log 실행 |
+| 2026-04-12 | Step 3 | #7 Overly Broad Pattern 방지 | ✅ | isValidPattern() — 최소 3자, 메타문자만 구성 패턴 거부. rule_rejected 이력 기록 |
+| 2026-04-12 | Step 3 | smoke test (50/50) | ✅ | 기존 25개 + #1,#5,#6,#7,#8 예외 케이스 25개 추가 |
