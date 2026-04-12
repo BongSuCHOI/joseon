@@ -1,4 +1,4 @@
-// src/harness/improver.ts — Plugin 3: L5 자가개선 + L6 폐루프
+// src/harness/improver.ts — Plugin 3: L5 자가개선 + L6 폐루프 + Step 3 Bridge
 import {
     readFileSync, readdirSync, existsSync, writeFileSync,
     renameSync, unlinkSync, mkdirSync,
@@ -6,22 +6,42 @@ import {
 import { join } from 'path';
 import { execSync } from 'child_process';
 import type { Signal, Rule, ProjectState } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded } from '../shared/index.js';
 
 // ─── Helpers ────────────────────────────────────────────
 
+// #5: 정규식 catastrophic backtracking 방지
+// target 길이를 제한하고, 패턴 실행을 보호
+const REGEX_MAX_TARGET_LENGTH = 10000;
+
 function safeRegexTest(pattern: string, target: string): boolean {
     try {
-        return new RegExp(pattern, 'i').test(target);
+        // target 길이 제한으로 백트래킹 리스크 완화
+        const safeTarget = target.length > REGEX_MAX_TARGET_LENGTH
+            ? target.slice(0, REGEX_MAX_TARGET_LENGTH)
+            : target;
+        return new RegExp(pattern, 'i').test(safeTarget);
     } catch {
         return false;
     }
+}
+
+// #7: 과도하게 넓은 패턴 검증
+// 최소 3자, 메타문자만으로 구성된 패턴 거부
+function isValidPattern(pattern: string): boolean {
+    if (!pattern || pattern.length < 3) return false;
+    // 메타문자만 있는지 확인 (예: ".", ".*", ".+")
+    const metaOnly = pattern.replace(/[.*+?^${}()|[\]\\]/g, '');
+    if (metaOnly.length === 0) return false;
+    return true;
 }
 
 function appendHistory(event: string, data: Record<string, unknown>): void {
     const historyPath = join(HARNESS_DIR, 'rules', 'history.jsonl');
     try {
         mkdirSync(join(HARNESS_DIR, 'rules'), { recursive: true });
+        // Phase 5: append 전 로테이션 체크
+        rotateHistoryIfNeeded(historyPath);
         writeFileSync(
             historyPath,
             JSON.stringify({ event, timestamp: new Date().toISOString(), ...data }) + '\n',
@@ -44,7 +64,44 @@ function loadJsonFiles<T>(dir: string): T[] {
     return items;
 }
 
-// ─── 3.2 signalToRule — pending signal → SOFT 규칙 변환 ─
+// ─── Phase 2: syncRulesMarkdown — .opencode/rules/ 마크다운 동기화 ──
+
+function syncRulesMarkdown(worktree: string): void {
+    try {
+        const rulesDir = join(worktree, '.opencode', 'rules');
+        mkdirSync(rulesDir, { recursive: true });
+
+        // SOFT 규칙 마크다운
+        const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'));
+        const softPath = join(rulesDir, 'harness-soft-rules.md');
+        if (softRules.length > 0) {
+            const lines = ['# Harness Rules (auto-generated)', '## SOFT Rules'];
+            for (const r of softRules) {
+                lines.push(`- [SOFT|${r.pattern.scope}] ${r.description}`);
+            }
+            writeFileSync(softPath, lines.join('\n') + '\n');
+        } else {
+            writeFileSync(softPath, '# Harness Rules (auto-generated)\n## SOFT Rules\n<!-- no soft rules yet -->\n');
+        }
+
+        // HARD 규칙 마크다운
+        const hardRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/hard'));
+        const hardPath = join(rulesDir, 'harness-hard-rules.md');
+        if (hardRules.length > 0) {
+            const lines = ['# Harness Rules (auto-generated)', '## HARD Rules'];
+            for (const r of hardRules) {
+                lines.push(`- [HARD|${r.pattern.scope}] ${r.description}`);
+            }
+            writeFileSync(hardPath, lines.join('\n') + '\n');
+        } else {
+            writeFileSync(hardPath, '# Harness Rules (auto-generated)\n## HARD Rules\n<!-- no hard rules yet -->\n');
+        }
+    } catch {
+        /* rules 마크다운 동기화 실패는 치명적이지 않음 */
+    }
+}
+
+// ─── 3.2 signalToRule — pending signal → SOFT 규칙 변환 ──────────────
 
 function mapSignalTypeToScope(signalType: Signal['type']): Rule['pattern']['scope'] {
     switch (signalType) {
@@ -74,9 +131,19 @@ function ruleExists(patternMatch: string, projectKey: string): boolean {
     return false;
 }
 
-function signalToRule(signal: Signal): void {
+function signalToRule(signal: Signal, worktree: string): void {
     const pattern = signal.payload.pattern || signal.payload.description;
     if (!pattern) return;
+
+    // #7: 과도하게 넓은 패턴 거부
+    if (!isValidPattern(pattern)) {
+        appendHistory('rule_rejected', {
+            signal_id: signal.id,
+            pattern,
+            reason: 'invalid_or_too_broad_pattern',
+        });
+        return;
+    }
 
     // 중복 체크 (soft + hard 양쪽)
     if (ruleExists(pattern, signal.project_key)) {
@@ -101,6 +168,12 @@ function signalToRule(signal: Signal): void {
 
     const rulePath = join(HARNESS_DIR, `rules/soft/${rule.id}.json`);
     mkdirSync(join(HARNESS_DIR, 'rules/soft'), { recursive: true });
+
+    // #1: write 직전에 한 번 더 중복 체크 (TOCTOU 경쟁 완화)
+    if (existsSync(rulePath) || ruleExists(pattern, signal.project_key)) {
+        return;
+    }
+
     writeFileSync(rulePath, JSON.stringify(rule, null, 2));
 
     appendHistory('rule_created', {
@@ -109,15 +182,20 @@ function signalToRule(signal: Signal): void {
         pattern: rule.pattern.match,
         scope: rule.pattern.scope,
     });
+
+    // Phase 2: 규칙 생성 후 마크다운 동기화
+    syncRulesMarkdown(worktree);
 }
 
 // ─── 3.3 promoteRules — SOFT→HARD 자동 승격 ───────────
 
-function promoteRules(projectKey: string): void {
+function promoteRules(projectKey: string, worktree: string): void {
     const softDir = join(HARNESS_DIR, 'rules/soft');
     const hardDir = join(HARNESS_DIR, 'rules/hard');
     if (!existsSync(softDir)) return;
     mkdirSync(hardDir, { recursive: true });
+
+    let promoted = false;
 
     for (const file of readdirSync(softDir)) {
         if (!file.endsWith('.json')) continue;
@@ -141,12 +219,19 @@ function promoteRules(projectKey: string): void {
         writeFileSync(hardPath, JSON.stringify(rule, null, 2));
         unlinkSync(filePath); // soft에서 삭제
 
+        promoted = true;
+
         appendHistory('rule_promoted', {
             rule_id: rule.id,
             pattern: rule.pattern.match,
             scope: rule.pattern.scope,
             promoted_at: rule.promoted_at,
         });
+    }
+
+    // Phase 2: 승격 발생 시 마크다운 동기화
+    if (promoted) {
+        syncRulesMarkdown(worktree);
     }
 }
 
@@ -173,15 +258,16 @@ function evaluateRuleEffectiveness(): void {
 
             // Delta 기반 측정 (v3 버그 W3 수정)
             const lastCount = rule.effectiveness?.recurrence_after_rule || 0;
-            const delta = rule.violation_count - (rule.effectiveness?.recurrence_after_rule ?? 0);
-            // 더 정확하게: 이전 측정 시점의 violation_count를 기억
-            // 첫 측정이면 effectiveness가 없으므로 전체 violation_count가 delta
             const actualDelta = rule.effectiveness
                 ? rule.violation_count - lastCount
                 : rule.violation_count;
 
-            let status: 'effective' | 'warning' | 'needs_promotion';
-            if (actualDelta === 0) {
+            // scope:prompt 규칙은 enforcer에서 위반 감지 불가 → violation_count가 항상 0
+            // "effective" 거짓 판정 방지. LLM 기반 감지 도입 시 재검토 (Step 4)
+            let status: 'effective' | 'warning' | 'needs_promotion' | 'unmeasurable';
+            if (rule.pattern.scope === 'prompt') {
+                status = 'unmeasurable';
+            } else if (actualDelta === 0) {
                 status = 'effective';
             } else if (actualDelta >= 2) {
                 status = 'needs_promotion';
@@ -210,6 +296,14 @@ function evaluateRuleEffectiveness(): void {
 }
 
 // ─── 3.5 detectFixCommits — fix: 커밋 감지 (Loop 1) ────
+// Phase 4: COMMIT_START delimiter 기반 파싱으로 고도화
+
+// #6: 명령어 인젝션 방지 — ISO 날짜 형식만 허용
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?)?$/;
+
+function isValidTimestamp(ts: unknown): ts is string {
+    return typeof ts === 'string' && ISO_DATE_REGEX.test(ts);
+}
 
 function detectFixCommits(worktree: string, projectKey: string): void {
     // 세션 시작 타임스탬프 읽기
@@ -222,11 +316,14 @@ function detectFixCommits(worktree: string, projectKey: string): void {
         startTime = startInfo.timestamp;
     } catch { return; }
 
-    // git log --since로 세션 내 fix: 커밋 조회
+    // #6: timestamp가 ISO 날짜 형식이 아니면 중단
+    if (!isValidTimestamp(startTime)) return;
+
+    // Phase 4: COMMIT_START delimiter 기반 파싱
     let logOutput: string;
     try {
         logOutput = execSync(
-            `git log --since="${startTime}" --format="%H|||%s|||" --name-only --no-merges`,
+            `git log --since="${startTime}" --format="COMMIT_START%n%H%n%s" --name-only --no-merges`,
             { cwd: worktree, encoding: 'utf-8', timeout: 5000 },
         );
     } catch {
@@ -234,17 +331,18 @@ function detectFixCommits(worktree: string, projectKey: string): void {
         return;
     }
 
-    // 파싱: 커밋 해시|||메시지||| 다음 줄에 파일 목록
-    const commits = logOutput.split('\n\n').filter(Boolean);
-    for (const block of commits) {
+    // COMMIT_START delimiter로 명확하게 블록 분리
+    const blocks = logOutput.split('COMMIT_START\n').filter(Boolean);
+    for (const block of blocks) {
         const lines = block.trim().split('\n');
-        const header = lines[0];
-        if (!header || !header.includes('|||')) continue;
+        if (lines.length < 2) continue;
 
-        const [hash, message] = header.split('|||');
-        if (!message || !message.startsWith('fix')) continue;
+        const hash = lines[0].trim();
+        const message = lines[1].trim();
+        if (!hash || !message.startsWith('fix')) continue;
 
-        const files = lines.slice(1).filter((l) => l.trim().length > 0);
+        // 3번째 줄부터 파일 목록
+        const files = lines.slice(2).filter((l) => l.trim().length > 0);
         const firstFile = files[0] || '';
 
         // fix_commit signal 생성
@@ -297,7 +395,111 @@ function updateProjectState(projectKey: string, worktree: string): void {
     writeFileSync(join(stateDir, 'state.json'), JSON.stringify(state, null, 2));
 }
 
+// ─── Phase 3: Memory Index — 세션 JSONL에서 키워드 추출 ──
+
+const MEMORY_KEYWORDS = [
+    /decision:\s*(.+)/i,
+    /결정:\s*(.+)/,
+    /DECISION:\s*(.+)/,
+    /NEVER DO:\s*(.+)/i,
+    /ALWAYS:\s*(.+)/i,
+    /MUST:\s*(.+)/i,
+    /FORBIDDEN:\s*(.+)/i,
+    /constraint:\s*(.+)/i,
+    /제약:\s*(.+)/,
+    /TODO:\s*(.+)/i,
+    /FIXME:\s*(.+)/i,
+];
+
+interface MemoryFact {
+    id: string;
+    keywords: string[];
+    content: string;
+    source_session: string;
+    created_at: string;
+}
+
+function indexSessionFacts(projectKey: string): void {
+    const sessionDir = join(HARNESS_DIR, 'logs/sessions');
+    if (!existsSync(sessionDir)) return;
+
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    mkdirSync(factsDir, { recursive: true });
+
+    // 세션 JSONL 파일 읽기 (모든 세션에서 추출 — 파일명에 projectKey가 없을 수 있음)
+    const sessionFiles = readdirSync(sessionDir).filter(
+        (f) => f.endsWith('.jsonl'),
+    );
+
+    for (const sessionFile of sessionFiles) {
+        const sessionPath = join(sessionDir, sessionFile);
+        let content: string;
+        try {
+            content = readFileSync(sessionPath, 'utf-8');
+        } catch { continue; }
+
+        const lines = content.split('\n').filter(Boolean);
+        const extractedFacts: { keywords: string[]; content: string }[] = [];
+
+        for (const line of lines) {
+            try {
+                const entry = JSON.parse(line);
+                const textToSearch = typeof entry === 'string' ? entry : JSON.stringify(entry);
+
+                for (const pattern of MEMORY_KEYWORDS) {
+                    const match = textToSearch.match(pattern);
+                    if (match && match[1]) {
+                        const keyword = match[1].trim().slice(0, 200); // 길이 제한
+                        extractedFacts.push({
+                            keywords: [pattern.source.replace(/\\s\*\(.*/, '').toLowerCase(), keyword.toLowerCase()],
+                            content: keyword,
+                        });
+                    }
+                }
+            } catch { /* 파싱 실패 무시 */ }
+        }
+
+        // 추출된 fact 저장
+        for (const fact of extractedFacts) {
+            const id = generateId();
+            const factData: MemoryFact = {
+                id,
+                keywords: [...new Set(fact.keywords)], // 중복 제거
+                content: fact.content,
+                source_session: sessionFile,
+                created_at: new Date().toISOString(),
+            };
+            writeFileSync(join(factsDir, `${id}.json`), JSON.stringify(factData, null, 2));
+        }
+    }
+}
+
+// ─── Phase 3: Memory Search — 키워드 매칭으로 fact 검색 ──
+
+function searchFacts(query: string, maxResults = 10): MemoryFact[] {
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    if (!existsSync(factsDir)) return [];
+
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
+    const facts = loadJsonFiles<MemoryFact>(factsDir);
+
+    // 각 fact에 대해 쿼리 단어와 키워드의 교집합 점수 계산
+    const scored = facts
+        .map((fact) => {
+            const factText = `${fact.keywords.join(' ')} ${fact.content}`.toLowerCase();
+            const score = queryWords.reduce((acc, word) => acc + (factText.includes(word) ? 1 : 0), 0);
+            return { fact, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxResults);
+
+    return scored.map((item) => item.fact);
+}
+
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
+// Phase 3: Memory Search 결과 주입 추가
 
 function buildCompactionContext(projectKey: string, worktree: string): string[] {
     const parts: string[] = [];
@@ -330,6 +532,19 @@ function buildCompactionContext(projectKey: string, worktree: string): string[] 
     if (softRules.length > 0) {
         const descriptions = softRules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
         parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
+    }
+
+    // Phase 3: Memory Search — 관련 fact 주입
+    const queryText = [
+        ...hardRules.map((r) => `${r.description} ${r.pattern.match}`),
+        ...softRules.map((r) => `${r.description} ${r.pattern.match}`),
+    ].join(' ');
+    const relevantFacts = searchFacts(queryText);
+    if (relevantFacts.length > 0) {
+        const factLines = relevantFacts.map(
+            (f) => `- [${f.source_session}] ${f.content} (keywords: ${f.keywords.join(', ')})`,
+        );
+        parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
     }
 
     return parts;
@@ -367,7 +582,7 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
                         if (signal.project_key !== projectKey) continue;
 
                         // signal → rule 변환 (중복이면 rule 생성 생략)
-                        signalToRule(signal);
+                        signalToRule(signal, ctx.worktree);
 
                         // signal을 ack로 이동 (idempotent: 재시도해도 안전)
                         renameSync(filePath, join(ackDir, file));
@@ -378,16 +593,23 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
             }
 
             // SOFT → HARD 승격
-            promoteRules(projectKey);
+            promoteRules(projectKey, ctx.worktree);
 
             // 30일 효과 측정
             evaluateRuleEffectiveness();
+
+            // Phase 3: Memory Index — 세션에서 키워드 추출
+            try {
+                indexSessionFacts(projectKey);
+            } catch (err) {
+                console.error('[harness] memory indexing failed:', err);
+            }
 
             // 프로젝트 상태 갱신
             updateProjectState(projectKey, ctx.worktree);
         },
 
-        // compacting 훅: scaffold + 규칙 컨텍스트 주입
+        // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
         'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
             const parts = buildCompactionContext(projectKey, ctx.worktree);
             for (const part of parts) {

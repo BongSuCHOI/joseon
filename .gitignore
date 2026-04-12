@@ -2,5 +2,11 @@ node_modules/
 dist/
 .DS_Store
 
+# OpenCode 로컬 플러그인 (src/에서 빌드하여 배포)
+.opencode/plugins/
+
+# OpenCode 자동 생성 rules 마크다운
+.opencode/rules/
+
 # Harness 런타임 데이터
 ~/.config/opencode/harness/

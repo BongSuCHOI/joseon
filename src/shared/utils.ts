@@ -1,4 +1,4 @@
-import { mkdirSync, appendFileSync, realpathSync } from 'fs';
+import { mkdirSync, appendFileSync, realpathSync, statSync, renameSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { HARNESS_DIR } from './constants.js';
@@ -25,6 +25,7 @@ export function ensureHarnessDirs(): void {
         join(HARNESS_DIR, 'rules/hard'),
         join(HARNESS_DIR, 'scaffold'),
         join(HARNESS_DIR, 'memory/archive'),
+        join(HARNESS_DIR, 'memory/facts'),
         join(HARNESS_DIR, 'projects'),
         join(HARNESS_DIR, 'metrics/effectiveness'),
     ];
@@ -40,6 +41,22 @@ export function logEvent(category: string, filename: string, data: Record<string
 
 export function generateId(): string {
     return randomUUID();
+}
+
+const HISTORY_MAX_BYTES = 1048576; // 1MB
+
+export function rotateHistoryIfNeeded(historyPath: string): void {
+    if (!existsSync(historyPath)) return;
+    try {
+        const size = statSync(historyPath).size;
+        if (size >= HISTORY_MAX_BYTES) {
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const dir = historyPath.slice(0, historyPath.lastIndexOf('/'));
+            const baseName = historyPath.slice(historyPath.lastIndexOf('/') + 1);
+            const rotatedName = baseName.replace('.jsonl', `-${ts}.jsonl`);
+            renameSync(historyPath, join(dir, rotatedName));
+        }
+    } catch { /* 로테이션 실패는 치명적이지 않음 */ }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

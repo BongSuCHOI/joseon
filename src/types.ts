@@ -35,7 +35,7 @@ export interface Rule {
     effectiveness?: {
         measured_at: string;
         recurrence_after_rule: number;
-        status: 'effective' | 'warning' | 'needs_promotion';
+        status: 'effective' | 'warning' | 'needs_promotion' | 'unmeasurable';
     };
 }
 

@@ -63,9 +63,15 @@ function incrementViolation(rule: Rule): void {
 }
 
 // 정규식 실행을 try-catch로 보호 (잘못된 패턴에 의한 크래시 방지)
+// #5: target 길이 제한으로 catastrophic backtracking 완화
+const ENFORCER_REGEX_MAX_LENGTH = 10000;
+
 function safeRegexTest(pattern: string, target: string): boolean {
     try {
-        return new RegExp(pattern, 'i').test(target);
+        const safeTarget = target.length > ENFORCER_REGEX_MAX_LENGTH
+            ? target.slice(0, ENFORCER_REGEX_MAX_LENGTH)
+            : target;
+        return new RegExp(pattern, 'i').test(safeTarget);
     } catch {
         return false;
     }
