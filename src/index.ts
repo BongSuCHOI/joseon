@@ -5,6 +5,7 @@ import { HarnessObserver } from './harness/observer.js';
 import { HarnessEnforcer } from './harness/enforcer.js';
 import { HarnessImprover } from './harness/improver.js';
 import { mergeEventHandlers } from './shared/index.js';
+import { createAgents } from './agents/agents.js';
 
 export default {
   id: "my-harness",
@@ -26,5 +27,26 @@ export default {
       result[key] = handler;
     }
     return result;
-  }
+  },
+
+  // Step 4: 에이전트 자동 등록 (oh-my-opencode-slim 패턴)
+  config: (opencodeConfig: Record<string, unknown>) => {
+    const agents = createAgents();
+
+    // 에이전트 병합 (shallow merge — 사용자 설정이 우선)
+    if (!opencodeConfig.agent) {
+      opencodeConfig.agent = {};
+    }
+    const agentMap = opencodeConfig.agent as Record<string, unknown>;
+    for (const agent of agents) {
+      if (!agentMap[agent.name]) {
+        agentMap[agent.name] = agent;
+      }
+    }
+
+    // default_agent 설정 (사용자 미설정 시만)
+    if (!opencodeConfig.default_agent) {
+      opencodeConfig.default_agent = 'orchestrator';
+    }
+  },
 };

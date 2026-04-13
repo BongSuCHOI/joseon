@@ -1,0 +1,59 @@
+// src/orchestrator/qa-tracker.ts — QA 시나리오별 실패 추적
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { HARNESS_DIR } from '../shared/index.js';
+import type { QAFailures } from '../types.js';
+
+export interface QAVerdict {
+    verdict: 'retry' | 'escalate';
+    count: number;
+}
+
+function getQAFailuresPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'qa-failures.json');
+}
+
+function readQAFailures(filePath: string): QAFailures {
+    if (!existsSync(filePath)) return {};
+
+    try {
+        return JSON.parse(readFileSync(filePath, 'utf-8')) as QAFailures;
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * QA 실패를 기록하고 판정을 반환한다.
+ * 동일 시나리오 3회 실패 시 escalate.
+ */
+export function trackQAFailure(
+    projectKey: string,
+    scenarioId: string,
+    detail: string,
+): QAVerdict {
+    const filePath = getQAFailuresPath(projectKey);
+    const failures = readQAFailures(filePath);
+    const now = new Date().toISOString();
+
+    if (!failures[scenarioId]) {
+        failures[scenarioId] = {
+            count: 0,
+            last_failure_at: now,
+            details: [],
+        };
+    }
+
+    const entry = failures[scenarioId];
+    entry.count += 1;
+    entry.last_failure_at = now;
+    entry.details.push({
+        timestamp: now,
+        message: detail,
+    });
+
+    writeFileSync(filePath, JSON.stringify(failures, null, 2));
+
+    const verdict = entry.count >= 3 ? 'escalate' : 'retry';
+    return { verdict, count: entry.count };
+}
