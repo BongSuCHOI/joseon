@@ -87,3 +87,10 @@ observer, enforcer 모두 초기화 시 `ensureHarnessDirs()`를 호출한다.
 #### Scenario: EvalResult type available
 - **WHEN** harness eval 결과를 읽을 때
 - **THEN** `EvalResult` 인터페이스(`total_checks`, `passed_checks`, `hard_ratio`, `failures` array)를 사용함
+
+### Requirement: Plugin config callback registers agents
+플러그인 진입점 `src/index.ts`는 `server()` 외에 `config` 콜백을 포함하여 에이전트를 자동 등록한다.
+
+#### Scenario: Config callback registers agents
+- **WHEN** OpenCode가 플러그인을 로드하고 config 콜백을 호출함
+- **THEN** 모든 에이전트 정의가 `opencodeConfig.agent`에 병합되고 `default_agent`가 "orchestrator"로 설정됨
