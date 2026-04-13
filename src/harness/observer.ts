@@ -1,5 +1,5 @@
 // src/harness/observer.ts — Plugin 1: L1 관측 + L2 신호 변환
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId } from '../shared/index.js';
 
@@ -9,6 +9,47 @@ function emitSignal(signal: Record<string, unknown>): void {
         join(HARNESS_DIR, 'signals/pending', `${id}.json`),
         JSON.stringify({ id, status: 'pending', timestamp: new Date().toISOString(), ...signal }, null, 2),
     );
+}
+
+// ── PID 세션 차단 유틸리티 ──
+
+function isProcessRunning(pid: number): boolean {
+    try {
+        // signal 0 = 생존 확인만 (실제 시그널 전송 없음)
+        process.kill(pid, 0);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function acquireSessionLock(projectKey: string): void {
+    const lockDir = join(HARNESS_DIR, 'projects', projectKey);
+    const lockPath = join(lockDir, '.session-lock');
+
+    if (existsSync(lockPath)) {
+        try {
+            const lockData = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid: number; started_at: string };
+            if (isProcessRunning(lockData.pid)) {
+                console.warn(`[harness] Session already active for this project (PID: ${lockData.pid}). Proceeding anyway.`);
+                return;
+            }
+            // Stale lock — PID가 죽었으므로 교체
+        } catch {
+            // 손상된 lock 파일 — 교체
+        }
+    }
+
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }, null, 2));
+}
+
+function releaseSessionLock(projectKey: string): void {
+    const lockPath = join(HARNESS_DIR, 'projects', projectKey, '.session-lock');
+    try {
+        if (existsSync(lockPath)) {
+            unlinkSync(lockPath);
+        }
+    } catch { /* 정리 실패는 치명적이지 않음 */ }
 }
 
 export const HarnessObserver = async (ctx: { worktree: string }) => {
@@ -38,13 +79,16 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                     join(HARNESS_DIR, 'logs/sessions', `session_start_${projectKey}.json`),
                     JSON.stringify({ timestamp: new Date().toISOString(), sessionID }, null, 2),
                 );
+                // PID 세션 락 획득
+                acquireSessionLock(projectKey);
             }
 
-            // 세션 완료 로깅
+            // 세션 완료 로깅 + PID 락 해제
             if (event.type === 'session.idle') {
                 logEvent('sessions', `${(event.properties as { sessionID?: string })?.sessionID || 'unknown'}.jsonl`, {
                     event: 'session_idle',
                 });
+                releaseSessionLock(projectKey);
             }
 
             // L2: 세션 에러 감지 + 반복 에러 카운팅

@@ -6,6 +6,7 @@ export interface Signal {
     type: 'fix_commit' | 'error_repeat' | 'user_feedback' | 'violation';
     project_key: string;
     session_id?: string;
+    agent_id?: string;  // Step 4: 오케스트레이터/서브에이전트 식별용
     timestamp: string;
     payload: {
         description: string;
@@ -53,5 +54,45 @@ export interface ProjectState {
         hard_ratio: number;
         total_checks: number;
         passed_checks: number;
+    }>;
+}
+
+// Step 4: 오케스트레이션 타입
+
+export interface PhaseHistoryEntry {
+    phase: number;
+    entered_at: string;
+    completed_at?: string;
+}
+
+export interface PhaseState {
+    current_phase: number;        // 1~5
+    phase_history: PhaseHistoryEntry[];
+    qa_test_plan_exists: boolean;
+    incomplete_phase?: number;    // 마지막 history entry에 completed_at 없으면 설정
+}
+
+export interface QAFailureDetail {
+    timestamp: string;
+    message: string;
+    agent_id?: string;
+}
+
+export interface QAFailures {
+    [scenarioId: string]: {
+        count: number;
+        last_failure_at: string;
+        details: QAFailureDetail[];
+    };
+}
+
+export interface EvalResult {
+    total_checks: number;
+    passed_checks: number;
+    hard_ratio: number;
+    failures: Array<{
+        rule_id: string;
+        description: string;
+        timestamp: string;
     }>;
 }
