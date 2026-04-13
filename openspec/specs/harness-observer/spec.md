@@ -57,3 +57,25 @@ Observer가 생성하는 모든 signal은 `project_key` 필드를 포함하며, 
 #### Scenario: Signal contains correct project key
 - **WHEN** 임의의 signal이 생성됨
 - **THEN** signal의 `project_key`는 `getProjectKey(ctx.worktree)`의 반환값과 일치함
+
+### Requirement: Observer acquires PID session lock on session.created
+Observer 플러그인은 `session.created` 이벤트에서 프로젝트 상태 초기화와 함께 PID 세션 락을 획득한다. 같은 프로젝트에서 동시 세션 실행을 방지한다.
+
+#### Scenario: New session with no lock
+- **WHEN** `session.created` 이벤트 발생하고 프로젝트에 `.session-lock` 파일이 없음
+- **THEN** observer가 PID 락 파일을 생성하고 기존대로 프로젝트 상태를 초기화함
+
+#### Scenario: New session with stale lock
+- **WHEN** `session.created` 이벤트 발생하고 `.session-lock`이 존재하지만 PID가 종료됨
+- **THEN** observer가 락 파일을 교체하고 정상적으로 프로젝트 상태를 초기화함
+
+#### Scenario: New session with active lock
+- **WHEN** `session.created` 이벤트 발생하고 `.session-lock`에 활성 PID가 있음
+- **THEN** observer가 "[harness] Session already active for this project (PID: {pid})" 경고를 로그하고 계속 진행함 (crash하지 않음)
+
+### Requirement: Observer releases PID session lock on session.idle
+Observer 플러그인은 `session.idle` 이벤트에서 PID 세션 락 파일을 삭제한다.
+
+#### Scenario: Session idle removes lock
+- **WHEN** `session.idle` 이벤트 발생함
+- **THEN** `.session-lock` 파일이 삭제됨

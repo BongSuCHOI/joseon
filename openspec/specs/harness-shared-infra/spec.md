@@ -68,3 +68,22 @@ observer, enforcer 모두 초기화 시 `ensureHarnessDirs()`를 호출한다.
 #### Scenario: Enforcer initializes directories
 - **WHEN** HarnessEnforcer 플러그인이 로드됨
 - **THEN** `ensureHarnessDirs()`가 호출되어 런타임 디렉토리가 존재함이 보장됨
+
+### Requirement: Type definitions include Step 4 orchestration types
+`src/types.ts`는 Step 4 오케스트레이션에 필요한 모든 타입을 포함한다.
+
+#### Scenario: Signal type extended with agent_id
+- **WHEN** 오케스트레이터가 Signal을 생성함
+- **THEN** `agent_id?: string` 필드를 포함하여 어떤 에이전트가 signal을 생성했는지 식별 가능함
+
+#### Scenario: PhaseState type available
+- **WHEN** Phase Manager가 Phase 상태를 읽거나 쓸 때
+- **THEN** `PhaseState` 인터페이스(`current_phase`, `phase_history`, `qa_test_plan_exists`, optional `incomplete_phase`)를 사용함
+
+#### Scenario: QAFailures type available
+- **WHEN** QA tracker가 실패를 기록할 때
+- **THEN** `QAFailures` 인터페이스(scenario-level `count`, `last_failure_at`, `details` array)를 사용함
+
+#### Scenario: EvalResult type available
+- **WHEN** harness eval 결과를 읽을 때
+- **THEN** `EvalResult` 인터페이스(`total_checks`, `passed_checks`, `hard_ratio`, `failures` array)를 사용함
