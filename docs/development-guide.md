@@ -422,3 +422,7 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-13 | Step 4a | smoke test — PID Lock (9/9) | ✅ | 최초 생성, stale lock 교체, 활성 lock 경고, 정리 |
 | 2026-04-13 | Step 4a | 기존 Step 1 스모크 (21/21) | ✅ | 회귀 없음 |
 | 2026-04-13 | Step 4a | 기존 Step 3 스모크 (50/50) | ✅ | 회귀 없음 |
+| 2026-04-13 | Step 4b | npm run build | ✅ | 에이전트 정의 + config 콜백 빌드 성공 |
+| 2026-04-13 | Step 4c | npm run build | ✅ | 에러 복구 + QA 추적기 빌드 성공 |
+| 2026-04-13 | Step 4c | smoke test — Error Recovery + QA (24/24) | ✅ | 에러 복구 5단계 진행, QA retry→escalate, 시나리오별 독립 추적 |
+| 2026-04-13 | Step 4c | 기존 Step 1/3/4a 회귀 | ✅ | 회귀 없음 |
