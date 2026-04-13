@@ -19,10 +19,12 @@
 │   ├── constants.ts
 │   ├── utils.ts          # getProjectKey, ensureHarnessDirs, logEvent, generateId, mergeEventHandlers
 │   └── index.ts
-└── harness/
-    ├── observer.ts
-    ├── enforcer.ts
-    └── improver.ts       # Step 2 추가: L5 자가개선 + L6 폐루프
+├── harness/
+│   ├── observer.ts
+│   ├── enforcer.ts
+│   └── improver.ts       # Step 2 추가: L5 자가개선 + L6 폐루프
+└── orchestrator/
+    └── phase-manager.ts  # Step 4a 추가: Phase 상태 관리 + Phase 2.5 gate
 ```
 
 **Step 3 추가 사항:**
@@ -30,6 +32,11 @@
 - `ensureHarnessDirs()`에 `memory/facts/`, `memory/archive/` 추가
 - `harness/improver.ts`에 `syncRulesMarkdown()`, `indexSessionFacts()`, `searchFacts()` 추가
 - `.opencode/rules/`에 `harness-soft-rules.md`, `harness-hard-rules.md` 자동 생성/갱신
+
+**Step 4a 추가 사항:**
+- `types.ts`에 `PhaseState`, `PhaseHistoryEntry`, `QAFailures`, `EvalResult` 인터페이스 추가. `Signal`에 `agent_id?: string` 추가
+- `orchestrator/phase-manager.ts` 신규: `getPhaseState`, `transitionPhase` (Phase 2.5 gate 포함), `resetPhase`
+- `harness/observer.ts`에 PID 세션 락 추가: `acquireSessionLock` (session.created), `releaseSessionLock` (session.idle)
 
 **핵심 규칙:**
 - `package.json`에 `"type": "module"` 필수
@@ -69,6 +76,7 @@ npm run build
 cp -r src/types.ts .opencode/plugins/harness/types.ts
 cp -r src/shared/ .opencode/plugins/harness/shared/
 cp -r src/harness/ .opencode/plugins/harness/harness/
+cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 
 # 3. index.ts는 진입점이 다르므로 별도 관리 (이미 .opencode/plugins/harness/index.ts에 있음)
 
@@ -409,3 +417,8 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-12 | Step 3 | #6 Command Injection 방지 | ✅ | detectFixCommits에서 ISO_DATE_REGEX로 timestamp 검증 후 git log 실행 |
 | 2026-04-12 | Step 3 | #7 Overly Broad Pattern 방지 | ✅ | isValidPattern() — 최소 3자, 메타문자만 구성 패턴 거부. rule_rejected 이력 기록 |
 | 2026-04-12 | Step 3 | smoke test (50/50) | ✅ | 기존 25개 + #1,#5,#6,#7,#8 예외 케이스 25개 추가 |
+| 2026-04-13 | Step 4a | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-13 | Step 4a | smoke test — Phase Manager (22/22) | ✅ | Phase 전환, 2.5 gate, 리셋, 미완료 감지, 손상 파일 폴백 |
+| 2026-04-13 | Step 4a | smoke test — PID Lock (9/9) | ✅ | 최초 생성, stale lock 교체, 활성 lock 경고, 정리 |
+| 2026-04-13 | Step 4a | 기존 Step 1 스모크 (21/21) | ✅ | 회귀 없음 |
+| 2026-04-13 | Step 4a | 기존 Step 3 스모크 (50/50) | ✅ | 회귀 없음 |

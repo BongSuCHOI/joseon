@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | 구현 전 |
+| 4 | 오케스트레이션 | + orchestrator | 🔧 진행 중 — types + phase-manager + session lock 완료 |
 
 ### 핵심 원칙
 
@@ -94,6 +94,7 @@ SOFT 규칙 생성 (rules/soft/)
 | **observer** | `src/harness/observer.ts` | L1 도구 실행 로깅 + L2 에러/불만 signal 생성 |
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
 | **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습 + L6 승격/효과측정 + compacting 컨텍스트 주입 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search |
+| **phase-manager** | `src/orchestrator/phase-manager.ts` | Phase 상태 파일 관리 + Phase 2.5 gate + PID 세션 락 (Step 4a) |
 
 ## 런타임 데이터
 
@@ -117,8 +118,14 @@ SOFT 규칙 생성 (rules/soft/)
 │   ├── facts/             # Memory Index — 추출된 키워드 fact
 │   └── archive/           # 세션 아카이브
 ├── projects/
-│   └── {key}/state.json   # 프로젝트 상태
+│   ├── {key}/
+│   │   ├── state.json     # 프로젝트 상태
+│   │   └── .session-lock  # PID 세션 락 (동시 실행 방지)
+│   └── ...
 └── memory/archive/        # 세션 아카이브
+
+# Phase 상태 (프로젝트 worktree 내부)
+{project}/.opencode/orchestrator-phase.json   # Phase 1~5 상태 + 이력
 ```
 
 ## 개발
@@ -132,6 +139,7 @@ cp src/index.ts .opencode/plugins/harness/index.ts
 cp src/types.ts .opencode/plugins/harness/types.ts
 cp -r src/shared/ .opencode/plugins/harness/shared/
 cp -r src/harness/ .opencode/plugins/harness/harness/
+cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 ```
 
 자세한 개발/테스트 절차는 [`docs/development-guide.md`](docs/development-guide.md)를 참조.
@@ -141,15 +149,17 @@ cp -r src/harness/ .opencode/plugins/harness/harness/
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (observer + enforcer + improver 병합)
-├── types.ts                     # Signal, Rule, ProjectState 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult 타입 정의
 ├── shared/
 │   ├── constants.ts             # HARNESS_DIR 경로 상수
 │   ├── utils.ts                 # getProjectKey, ensureHarnessDirs, logEvent, mergeEventHandlers, rotateHistoryIfNeeded
 │   └── index.ts                 # 배럴 export
-└── harness/
-    ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환
-    ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
-    └── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
+├── harness/
+│   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
+│   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
+│   └── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
+└── orchestrator/
+    └── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
 ```
 
 ## 참고

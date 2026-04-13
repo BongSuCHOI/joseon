@@ -302,8 +302,12 @@ my-harness/
 │       ├── scaffold.md            # 프로젝트 전용 NEVER DO
 │       ├── violations.jsonl       # 위반 이력
 │       ├── improvements.jsonl     # 자가개선 이력
-│       └── qa-failures.json       # QA 시나리오별 실패 추적 (Step 4)
+│       ├── qa-failures.json       # QA 시나리오별 실패 추적 (Step 4)
+│       └── .session-lock          # PID 세션 락 (Step 4a, 동시 실행 방지)
 └── metrics/                       # 효과 측정
+
+# Phase 상태 파일 (프로젝트 worktree 내부 — harness/ 외부)
+{project}/.opencode/orchestrator-phase.json   # Phase 1~5 상태 + 이력
     ├── results.tsv                # loopy-era-eval 결과 이력
     └── effectiveness/             # 규칙별 효과 측정
         └── {rule-id}.json         # 30일 효과 평가 데이터
@@ -322,6 +326,7 @@ export interface Signal {
     type: 'fix_commit' | 'error_repeat' | 'user_feedback' | 'violation';
     project_key: string; // 프로젝트 식별자 (git repo realpath의 hash)
     session_id?: string; // 발생 세션 (획득 가능할 때만)
+    agent_id?: string; // Step 4: 오케스트레이터/서브에이전트 식별용
     timestamp: string; // ISO 8601
     payload: {
         description: string; // 무엇이 감지되었는가
@@ -359,7 +364,7 @@ export interface Rule {
         // 효과 측정 (30일 후)
         measured_at: string;
         recurrence_after_rule: number;
-        status: 'effective' | 'warning' | 'needs_promotion';
+        status: 'effective' | 'warning' | 'needs_promotion' | 'unmeasurable';
     };
 }
 ```
@@ -387,6 +392,59 @@ export interface ProjectState {
         hard_ratio: number;
         total_checks: number;
         passed_checks: number;
+    }>;
+}
+```
+
+#### PhaseState (Phase 상태 — Step 4)
+
+```typescript
+// src/types.ts
+export interface PhaseHistoryEntry {
+    phase: number;          // 1~5
+    entered_at: string;     // ISO 8601
+    completed_at?: string;  // ISO 8601, 진행 중이면 undefined
+}
+
+export interface PhaseState {
+    current_phase: number;          // 1~5
+    phase_history: PhaseHistoryEntry[];
+    qa_test_plan_exists: boolean;
+    incomplete_phase?: number;      // 마지막 entry에 completed_at 없으면 설정
+}
+```
+
+#### QAFailures (QA 실패 추적 — Step 4)
+
+```typescript
+// src/types.ts
+export interface QAFailureDetail {
+    timestamp: string;
+    message: string;
+    agent_id?: string;
+}
+
+export interface QAFailures {
+    [scenarioId: string]: {
+        count: number;
+        last_failure_at: string;
+        details: QAFailureDetail[];
+    };
+}
+```
+
+#### EvalResult (평가 결과)
+
+```typescript
+// src/types.ts
+export interface EvalResult {
+    total_checks: number;
+    passed_checks: number;
+    hard_ratio: number;
+    failures: Array<{
+        rule_id: string;
+        description: string;
+        timestamp: string;
     }>;
 }
 ```
