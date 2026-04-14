@@ -24,7 +24,7 @@ function loadPrompt(filename: string): string {
 export function createOrchestratorAgent(): AgentDefinition {
     return {
         name: 'orchestrator',
-        description: '최상위 에이전트 — 판단/라우팅, 대규모 작업은 @build에게 위임',
+        description: '최상위 에이전트 — 판단/라우팅, 대규모 작업은 @builder에게 위임',
         config: {
             prompt: loadPrompt('orchestrator.md'),
             temperature: 0.1,
@@ -35,10 +35,10 @@ export function createOrchestratorAgent(): AgentDefinition {
 
 export function createBuildAgent(): AgentDefinition {
     return {
-        name: 'build',
+        name: 'builder',
         description: 'Phase PM — Phase 1~5 관리, 서브에이전트 분배, 완료 시 리셋',
         config: {
-            prompt: loadPrompt('build.md'),
+            prompt: loadPrompt('builder.md'),
             temperature: 0.1,
         },
         mode: 'subagent',
