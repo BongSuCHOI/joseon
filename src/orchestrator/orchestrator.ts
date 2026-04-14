@@ -1,7 +1,7 @@
 // src/orchestrator/orchestrator.ts — Plugin 4: 오케스트레이션 통제
 // Phase Manager, 에러 복구, QA 추적을 통합하는 플러그인 진입점
 import { getPhaseState } from './phase-manager.js';
-import { logEvent, getProjectKey, ensureHarnessDirs } from '../shared/index.js';
+import { logger, getProjectKey, ensureHarnessDirs } from '../shared/index.js';
 
 export const HarnessOrchestrator = async (ctx: { worktree: string }) => {
     ensureHarnessDirs();
@@ -16,8 +16,7 @@ export const HarnessOrchestrator = async (ctx: { worktree: string }) => {
                     const phaseState = getPhaseState(ctx.worktree);
                     // Phase 1이고 history가 비어있으면 로깅 불필요 (활성 Phase 없음)
                     if (phaseState.current_phase > 1 || phaseState.phase_history.length > 0) {
-                        logEvent('sessions', 'orchestrator.jsonl', {
-                            event: 'phase_summary_on_idle',
+                        logger.info('orchestrator', 'phase_summary_on_idle', {
                             project_key: projectKey,
                             current_phase: phaseState.current_phase,
                             incomplete_phase: phaseState.incomplete_phase ?? null,
@@ -25,7 +24,7 @@ export const HarnessOrchestrator = async (ctx: { worktree: string }) => {
                         });
                     }
                 } catch (err) {
-                    console.error('[harness] orchestrator session.idle error:', err);
+                    logger.error('orchestrator', 'session.idle error', { error: err });
                 }
             }
         },

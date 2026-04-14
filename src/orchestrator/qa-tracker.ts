@@ -2,7 +2,9 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR } from '../shared/index.js';
-import type { QAFailures } from '../types.js';
+import type { QAFailures, QAFailureDetail } from '../types.js';
+import type { HarnessSettings } from '../config/index.js';
+import { DEFAULT_HARNESS_SETTINGS } from '../config/index.js';
 
 export interface QAVerdict {
     verdict: 'retry' | 'escalate';
@@ -31,7 +33,9 @@ export function trackQAFailure(
     projectKey: string,
     scenarioId: string,
     detail: string,
+    settings?: HarnessSettings,
 ): QAVerdict {
+    const threshold = settings?.escalation_threshold ?? DEFAULT_HARNESS_SETTINGS.escalation_threshold;
     const filePath = getQAFailuresPath(projectKey);
     const failures = readQAFailures(filePath);
     const now = new Date().toISOString();
@@ -54,6 +58,6 @@ export function trackQAFailure(
 
     writeFileSync(filePath, JSON.stringify(failures, null, 2));
 
-    const verdict = entry.count >= 3 ? 'escalate' : 'retry';
+    const verdict = entry.count >= threshold ? 'escalate' : 'retry';
     return { verdict, count: entry.count };
 }

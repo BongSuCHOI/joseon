@@ -1,7 +1,7 @@
 // src/harness/observer.ts — Plugin 1: L1 관측 + L2 신호 변환
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId, logger } from '../shared/index.js';
 
 function emitSignal(signal: Record<string, unknown>): void {
     const id = generateId();
@@ -31,7 +31,7 @@ function acquireSessionLock(projectKey: string): void {
         try {
             const lockData = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid: number; started_at: string };
             if (isProcessRunning(lockData.pid)) {
-                console.warn(`[harness] Session already active for this project (PID: ${lockData.pid}). Proceeding anyway.`);
+                logger.warn('observer', 'Session already active', { pid: lockData.pid });
                 return;
             }
             // Stale lock — PID가 죽었으므로 교체
@@ -62,7 +62,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
         // L1: 도구 실행 후 기록 (순수 로깅만 담당)
         'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output: { title: string; output: string }) => {
             const date = new Date().toISOString().slice(0, 10);
-            logEvent('tools', `${date}.jsonl`, {
+            logger.info('observer', 'tool executed', {
                 tool: input.tool,
                 args: input.args,
                 title: output.title,
@@ -85,8 +85,9 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
 
             // 세션 완료 로깅 + PID 락 해제
             if (event.type === 'session.idle') {
-                logEvent('sessions', `${(event.properties as { sessionID?: string })?.sessionID || 'unknown'}.jsonl`, {
+                logger.info('observer', 'session_idle', {
                     event: 'session_idle',
+                    sessionID: (event.properties as { sessionID?: string })?.sessionID,
                 });
                 releaseSessionLock(projectKey);
             }
@@ -100,8 +101,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                 const count = (errorCounts.get(key) || 0) + 1;
                 errorCounts.set(key, count);
 
-                logEvent('errors', `${date}.jsonl`, {
-                    event: 'session_error',
+                logger.error('observer', 'session_error', {
                     sessionID: (event.properties as { sessionID?: string })?.sessionID,
                     error: errorInfo,
                     repeat_count: count,
@@ -122,7 +122,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
 
             // 파일 편집 감지 — Step 1에서는 로깅만. Step 2에서 fix: 커밋 학습에 사용.
             if (event.type === 'file.edited') {
-                logEvent('sessions', `current.jsonl`, {
+                logger.info('observer', 'file_edited', {
                     event: 'file_edited',
                     file: (event.properties as { file?: string })?.file,
                 });

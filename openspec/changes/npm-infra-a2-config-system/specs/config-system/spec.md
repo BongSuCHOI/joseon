@@ -1,0 +1,60 @@
+## ADDED Requirements
+
+### Requirement: Config schema defines HarnessConfig type
+`src/config/schema.ts`는 `HarnessConfig` 인터페이스를 정의한다. 최상위 키는 `agents`와 `harness`이며, 모든 필드는 optional이다.
+
+#### Scenario: HarnessConfig has agents and harness sections
+- **WHEN** `HarnessConfig` 타입을 사용함
+- **THEN** `agents?: Record<string, AgentOverrideConfig>`과 `harness?: HarnessSettings` 필드가 정의되어 있음
+
+### Requirement: AgentOverrideConfig allows per-agent overrides
+`AgentOverrideConfig`은 `model`, `temperature`, `hidden` 필드를 가진다. 모두 optional.
+
+#### Scenario: Override agent temperature
+- **WHEN** config 파일에 `{"agents": {"designer": {"temperature": 0.9}}}`가 설정됨
+- **THEN** designer 에이전트의 temperature가 0.9로 오버라이드됨
+
+#### Scenario: Override agent model
+- **WHEN** config 파일에 `{"agents": {"builder": {"model": "claude-sonnet"}}}`가 설정됨
+- **THEN** builder 에이전트의 model이 "claude-sonnet"으로 오버라이드됨
+
+#### Scenario: Override agent hidden
+- **WHEN** config 파일에 `{"agents": {"explorer": {"hidden": true}}}`가 설정됨
+- **THEN** explorer 에이전트가 @mention 목록에서 숨겨짐
+
+### Requirement: HarnessSettings defines harness tuning parameters
+`HarnessSettings`은 `soft_to_hard_threshold`, `escalation_threshold`, `max_recovery_stages`, `history_max_bytes`, `regex_max_length`, `scaffold_match_ratio`, `search_max_results` 필드를 가진다. 모두 optional.
+
+#### Scenario: Override soft_to_hard_threshold
+- **WHEN** config 파일에 `{"harness": {"soft_to_hard_threshold": 3}}`가 설정됨
+- **THEN** enforcer가 violation_count 3에서 SOFT→HARD 승격을 수행함
+
+#### Scenario: All defaults match current hardcoded values
+- **WHEN** config 파일이 존재하지 않거나 harness 섹션이 비어있음
+- **THEN** 모든 하네스 설정값이 현재 하드코딩된 기본값과 동일함
+
+### Requirement: Config loader reads JSONC and JSON files
+`src/config/loader.ts`의 `loadConfig(directory)` 함수는 JSONC(주석 허용)와 JSON 파일을 모두 읽을 수 있다. JSONC에서 `//` 주석과 trailing comma를 제거한 후 JSON.parse로 파싱한다.
+
+#### Scenario: Load JSONC with comments
+- **WHEN** `harness.jsonc`에 `// 이것은 주석`과 `"key": "value",` (trailing comma)가 포함되어 있음
+- **THEN** 주석이 제거되고 trailing comma가 정리된 후 정상적으로 파싱됨
+
+#### Scenario: Load pure JSON as fallback
+- **WHEN** `harness.jsonc`가 없고 `harness.json`만 존재함
+- **THEN** `harness.json`이 정상적으로 로드됨
+
+### Requirement: Config loader merges global and project configs
+글로벌 설정(`~/.config/opencode/harness.jsonc`)을 먼저 로드하고, 프로젝트 설정(`<project>/.opencode/harness.jsonc`)을 deep-merge하여 프로젝트 설정이 우선한다.
+
+#### Scenario: Project overrides global
+- **WHEN** 글로벌에 `{"agents": {"builder": {"temperature": 0.2}}}`가 있고 프로젝트에 `{"agents": {"builder": {"temperature": 0.05}}}`가 있음
+- **THEN** builder의 temperature는 0.05가 됨
+
+#### Scenario: No config files returns defaults
+- **WHEN** 글로벌과 프로젝트 모두 config 파일이 없음
+- **THEN** 빈 HarnessConfig 객체가 반환됨 (모든 값이 기본값으로 동작)
+
+#### Scenario: Invalid config file returns defaults
+- **WHEN** config 파일이 존재하지만 JSON 파싱에 실패함
+- **THEN** 빈 HarnessConfig 객체가 반환됨 (에러를 throw하지 않음)

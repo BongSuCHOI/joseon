@@ -6,13 +6,15 @@ import {
 import { join } from 'path';
 import { execSync } from 'child_process';
 import type { Signal, Rule, ProjectState } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger } from '../shared/index.js';
+import type { HarnessConfig } from '../config/index.js';
+import { getHarnessSettings } from '../config/index.js';
 
 // ─── Helpers ────────────────────────────────────────────
 
 // #5: 정규식 catastrophic backtracking 방지
 // target 길이를 제한하고, 패턴 실행을 보호
-const REGEX_MAX_TARGET_LENGTH = 10000;
+const REGEX_MAX_TARGET_LENGTH = 10000; // default, overridden by config
 
 function safeRegexTest(pattern: string, target: string): boolean {
     try {
@@ -189,7 +191,7 @@ function signalToRule(signal: Signal, worktree: string): void {
 
 // ─── 3.3 promoteRules — SOFT→HARD 자동 승격 ───────────
 
-function promoteRules(projectKey: string, worktree: string): void {
+function promoteRules(projectKey: string, worktree: string, threshold: number): void {
     const softDir = join(HARNESS_DIR, 'rules/soft');
     const hardDir = join(HARNESS_DIR, 'rules/hard');
     if (!existsSync(softDir)) return;
@@ -206,7 +208,7 @@ function promoteRules(projectKey: string, worktree: string): void {
         } catch { continue; }
 
         // 조건: violation_count >= 2 + scope !== 'prompt' + 프로젝트 일치
-        if (rule.violation_count < 2) continue;
+        if (rule.violation_count < threshold) continue;
         if (rule.pattern.scope === 'prompt') continue;
         if (rule.project_key !== projectKey && rule.project_key !== 'global') continue;
 
@@ -501,7 +503,7 @@ function searchFacts(query: string, maxResults = 10): MemoryFact[] {
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
 // Phase 3: Memory Search 결과 주입 추가
 
-function buildCompactionContext(projectKey: string, worktree: string): string[] {
+function buildCompactionContext(projectKey: string, worktree: string, maxResults: number): string[] {
     const parts: string[] = [];
 
     // Scaffold 주입
@@ -539,7 +541,7 @@ function buildCompactionContext(projectKey: string, worktree: string): string[] 
         ...hardRules.map((r) => `${r.description} ${r.pattern.match}`),
         ...softRules.map((r) => `${r.description} ${r.pattern.match}`),
     ].join(' ');
-    const relevantFacts = searchFacts(queryText);
+    const relevantFacts = searchFacts(queryText, maxResults);
     if (relevantFacts.length > 0) {
         const factLines = relevantFacts.map(
             (f) => `- [${f.source_session}] ${f.content} (keywords: ${f.keywords.join(', ')})`,
@@ -552,9 +554,10 @@ function buildCompactionContext(projectKey: string, worktree: string): string[] 
 
 // ─── 3.1 Main Plugin Export ─────────────────────────────
 
-export const HarnessImprover = async (ctx: { worktree: string }) => {
+export const HarnessImprover = async (ctx: { worktree: string }, config?: HarnessConfig) => {
     ensureHarnessDirs();
     const projectKey = getProjectKey(ctx.worktree);
+    const settings = getHarnessSettings(config);
 
     return {
         // event 훅: session.idle에서 L5+L6 처리
@@ -565,7 +568,7 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
                 // Loop 1: fix: 커밋 감지 → fix_commit signal 생성
                 detectFixCommits(ctx.worktree, projectKey);
             } catch (err) {
-                console.error('[harness] fix commit detection failed:', err);
+                logger.error('improver', 'fix commit detection failed', { error: err });
             }
 
             // pending signal → SOFT 규칙 변환
@@ -587,13 +590,13 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
                         // signal을 ack로 이동 (idempotent: 재시도해도 안전)
                         renameSync(filePath, join(ackDir, file));
                     } catch (err) {
-                        console.error(`[harness] failed to process signal ${file}:`, err);
+                        logger.error('improver', 'failed to process signal', { file, error: err });
                     }
                 }
             }
 
             // SOFT → HARD 승격
-            promoteRules(projectKey, ctx.worktree);
+            promoteRules(projectKey, ctx.worktree, settings.soft_to_hard_threshold);
 
             // 30일 효과 측정
             evaluateRuleEffectiveness();
@@ -602,7 +605,7 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
             try {
                 indexSessionFacts(projectKey);
             } catch (err) {
-                console.error('[harness] memory indexing failed:', err);
+                logger.error('improver', 'memory indexing failed', { error: err });
             }
 
             // 프로젝트 상태 갱신
@@ -611,7 +614,7 @@ export const HarnessImprover = async (ctx: { worktree: string }) => {
 
         // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
         'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
-            const parts = buildCompactionContext(projectKey, ctx.worktree);
+            const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results);
             for (const part of parts) {
                 output.context.push(part);
             }

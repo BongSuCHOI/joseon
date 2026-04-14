@@ -2,6 +2,7 @@ import { mkdirSync, appendFileSync, realpathSync, statSync, renameSync, existsSy
 import { join } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { HARNESS_DIR } from './constants.js';
+import { logger } from './logger.js';
 
 export { HARNESS_DIR };
 
@@ -34,18 +35,19 @@ export function ensureHarnessDirs(): void {
     }
 }
 
+/**
+ * @deprecated Use logger.info() instead. This function redirects to the structured logger.
+ */
 export function logEvent(category: string, filename: string, data: Record<string, unknown>): void {
-    const filepath = join(HARNESS_DIR, 'logs', category, filename);
-    appendFileSync(filepath, JSON.stringify({ ...data, _ts: new Date().toISOString() }) + '\n');
+    logger.info('legacy', 'logEvent', { ...data, _category: category, _filename: filename });
 }
 
 export function generateId(): string {
     return randomUUID();
 }
 
-const HISTORY_MAX_BYTES = 1048576; // 1MB
-
-export function rotateHistoryIfNeeded(historyPath: string): void {
+export function rotateHistoryIfNeeded(historyPath: string, maxBytes?: number): void {
+    const HISTORY_MAX_BYTES = maxBytes ?? 1048576;
     if (!existsSync(historyPath)) return;
     try {
         const size = statSync(historyPath).size;
@@ -91,7 +93,7 @@ export function mergeEventHandlers(...hookObjects: HookObject[]): Record<string,
                     try {
                         await handler(input);
                     } catch (err) {
-                        console.error(`[harness] merged event handler error for '${key}':`, err);
+                        logger.error('shared', 'merged event handler error', { key, error: err });
                     }
                 }
             };

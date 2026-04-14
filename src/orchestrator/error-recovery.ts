@@ -2,6 +2,8 @@
 import { appendFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR } from '../shared/index.js';
+import type { HarnessSettings } from '../config/index.js';
+import { DEFAULT_HARNESS_SETTINGS } from '../config/index.js';
 
 export interface RecoveryAttempt {
     timestamp: string;
@@ -62,13 +64,15 @@ export function attemptRecovery(
     projectKey: string,
     error: string,
     context?: string,
+    settings?: HarnessSettings,
 ): RecoveryStage {
+    const maxStages = settings?.max_recovery_stages ?? DEFAULT_HARNESS_SETTINGS.max_recovery_stages;
     const filePath = getRecoveryFilePath(projectKey);
     const errorSummary = error.slice(0, 200);
     const lastStage = getLastStageForError(filePath, errorSummary);
 
     // 다음 단계 (최대 5)
-    const nextStage = Math.min(lastStage + 1, 5);
+    const nextStage = Math.min(lastStage + 1, maxStages);
     const action = ACTIONS[nextStage] || 'escalate_to_user';
 
     // 이력 기록

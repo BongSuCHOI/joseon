@@ -219,12 +219,12 @@ try {
         assert(sub.mode === 'subagent', `${sub.name} mode === subagent`);
     }
 
-    // 4-5. hidden 에이전트 검증
+    // 4-5. hidden 에이전트 검증 (all agents visible by default, configurable via harness.jsonc)
     console.log('\n[4-5] hidden 에이전트 검증');
-    const hiddenExpected = ['frontend', 'backend', 'tester', 'explorer'];
-    for (const name of hiddenExpected) {
+    const visibleExpected = ['frontend', 'backend', 'tester', 'explorer'];
+    for (const name of visibleExpected) {
         const agent = agents.find(a => a.name === name);
-        assert(agent?.hidden === true, `${name}: hidden === true`);
+        assert(agent?.hidden === false, `${name}: hidden === false`);
     }
 
     // 4-6. reviewer 권한 검증
@@ -253,10 +253,10 @@ try {
 
     // 5-3. 플러그인 config 검증
     console.log('\n[5-3] 플러그인 config');
-    assert(typeof plugin.config === 'function', 'config가 함수');
-    // config 호출 후 에이전트가 등록되는지 확인
+    const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
+    assert(typeof serverResult.config === 'function', 'config가 함수');
     const testConfig: Record<string, unknown> = {};
-    plugin.config(testConfig);
+    await serverResult.config(testConfig);
     assert(testConfig.default_agent === 'orchestrator', 'default_agent === orchestrator');
     const agentMap = testConfig.agent as Record<string, unknown>;
     assert(agentMap !== undefined && agentMap !== null, 'agent 객체가 설정됨');

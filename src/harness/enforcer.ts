@@ -3,6 +3,8 @@ import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { Rule } from '../types.js';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey } from '../shared/index.js';
+import type { HarnessConfig } from '../config/index.js';
+import { getHarnessSettings } from '../config/index.js';
 
 function loadRules(type: 'soft' | 'hard', projectKey: string): Rule[] {
     const rules: Rule[] = [];
@@ -64,12 +66,12 @@ function incrementViolation(rule: Rule): void {
 
 // 정규식 실행을 try-catch로 보호 (잘못된 패턴에 의한 크래시 방지)
 // #5: target 길이 제한으로 catastrophic backtracking 완화
-const ENFORCER_REGEX_MAX_LENGTH = 10000;
+// MAX_LENGTH는 HarnessEnformer 내부에서 settings로부터 설정됨
 
-function safeRegexTest(pattern: string, target: string): boolean {
+function safeRegexTest(pattern: string, target: string, maxLength: number): boolean {
     try {
-        const safeTarget = target.length > ENFORCER_REGEX_MAX_LENGTH
-            ? target.slice(0, ENFORCER_REGEX_MAX_LENGTH)
+        const safeTarget = target.length > maxLength
+            ? target.slice(0, maxLength)
             : target;
         return new RegExp(pattern, 'i').test(safeTarget);
     } catch {
@@ -77,8 +79,11 @@ function safeRegexTest(pattern: string, target: string): boolean {
     }
 }
 
-export const HarnessEnforcer = async (ctx: { worktree: string }) => {
+export const HarnessEnforcer = async (ctx: { worktree: string }, config?: HarnessConfig) => {
     ensureHarnessDirs();
+
+    const settings = getHarnessSettings(config);
+    const MAX_LENGTH = settings.regex_max_length;
 
     const projectKey = getProjectKey(ctx.worktree);
     let hardRules = loadRules('hard', projectKey);
@@ -102,7 +107,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }) => {
             // === HARD 규칙: 매칭 시 차단 (throw Error) ===
             for (const rule of hardRules) {
                 if (rule.pattern.scope === 'tool') {
-                    if (safeRegexTest(rule.pattern.match, input.tool) || safeRegexTest(rule.pattern.match, argsStr)) {
+                    if (safeRegexTest(rule.pattern.match, input.tool, MAX_LENGTH) || safeRegexTest(rule.pattern.match, argsStr, MAX_LENGTH)) {
                         throw new Error(
                             `[HARNESS HARD BLOCK] ${rule.description}\nRule: ${rule.id} | Pattern: ${rule.pattern.match}`,
                         );
@@ -110,7 +115,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }) => {
                 }
                 if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
                     const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
-                    if (safeRegexTest(rule.pattern.match, filePath)) {
+                    if (safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH)) {
                         throw new Error(
                             `[HARNESS HARD BLOCK] ${rule.description}\nRule: ${rule.id} | File: ${filePath}`,
                         );
@@ -126,11 +131,11 @@ export const HarnessEnforcer = async (ctx: { worktree: string }) => {
 
                 let matched = false;
                 if (rule.pattern.scope === 'tool') {
-                    matched = safeRegexTest(rule.pattern.match, input.tool) || safeRegexTest(rule.pattern.match, argsStr);
+                    matched = safeRegexTest(rule.pattern.match, input.tool, MAX_LENGTH) || safeRegexTest(rule.pattern.match, argsStr, MAX_LENGTH);
                 }
                 if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
                     const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
-                    matched = safeRegexTest(rule.pattern.match, filePath);
+                    matched = safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH);
                 }
                 if (matched) {
                     incrementViolation(rule);

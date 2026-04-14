@@ -7,19 +7,23 @@ import { HarnessImprover } from './harness/improver.js';
 import { HarnessOrchestrator } from './orchestrator/orchestrator.js';
 import { mergeEventHandlers } from './shared/index.js';
 import { createAgents } from './agents/agents.js';
+import { loadConfig } from './config/index.js';
+import { createAllHooks } from './hooks/index.js';
 
 export default {
   id: "my-harness",
   server: async (input: { project: unknown; client: unknown; $: unknown; directory: string; worktree: string }) => {
     const ctx = { worktree: input.worktree };
+    const harnessConfig = loadConfig(input.worktree || input.directory || process.cwd());
     const observerHooks = await HarnessObserver(ctx);
-    const enforcerHooks = await HarnessEnforcer(ctx);
-    const improverHooks = await HarnessImprover(ctx);
+    const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);
+    const improverHooks = await HarnessImprover(ctx, harnessConfig);
     const orchestratorHooks = await HarnessOrchestrator(ctx);
+    const extraHooks = createAllHooks();
 
     // v3 버그 C1 수정: 스프레드 대신 mergeEventHandlers로 event 훅 병합
     // (스프레드 연산자는 나중 것이 앞의 것을 덮어씀)
-    const allHooks = [observerHooks, enforcerHooks, improverHooks, orchestratorHooks];
+    const allHooks = [observerHooks, enforcerHooks, improverHooks, orchestratorHooks, extraHooks];
     const merged = mergeEventHandlers(...allHooks);
 
     // non-event 훅은 스프레드로 안전하게 합치고, event는 병합된 것 사용
@@ -32,7 +36,7 @@ export default {
     // Step 4: 에이전트 자동 등록 (oh-my-opencode-slim 패턴)
     // config는 Hooks의 프로퍼티여야 함 (PluginModule 최상위가 아님)
     (result as Record<string, unknown>).config = async (opencodeConfig: Record<string, unknown>) => {
-      const agents = createAgents();
+      const agents = createAgents(harnessConfig);
 
       // 에이전트 병합 (shallow merge — 사용자 설정이 우선)
       if (!opencodeConfig.agent) {

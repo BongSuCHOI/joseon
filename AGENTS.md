@@ -122,6 +122,13 @@ Orchestrator (최상위, 기본 에이전트)
 | 스킬 allowedAgents 시스템 | 에이전트별 도구 deny 구현 후. 스킬 설치 시 접근 가능 에이전트 지정. omOs의 `allowedAgents` 패턴 |
 | agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
 | Council 시스템 (council + councillor + council-master) | 다중 모델 환경(최소 2개 이상 서로 다른 모델) 구축 후. 단일 모델에서는 의미 없음. 중대한 아키텍처/보안 결정에만 사용. 질문당 3~5배 비용 |
+| Hooks — foreground-fallback (모델 자동 전환) | 다중 모델 환경 전제. Rate limit 감지 → 다음 미사용 모델로 자동 전환. omOs의 `ForegroundFallbackManager` 참조. 단일 모델에서는 동작 불가 |
+| Hooks — filter-available-skills (에이전트별 스킬 권한) | 스킬 allowedAgents 시스템 구현 후. omOs의 `createFilterAvailableSkillsHook` 참조. 에이전트별 permission.skill 규칙에 따라 available_skills 블록 필터링 |
+| Hooks — todo-continuation (TODO 자동 진행) | autopilot과 세트. maxContinuations/cooldownMs 설정 필요. omOs의 `createTodoContinuationHook` 참조. 고도화 단계에서 검토 |
+| Hooks — autopilot (자율 모드) | todo-continuation과 세트. 사용자 확인 없이 자동으로 다음 작업 수행. omOs의 `createAutopilotHook` 참조. 고도화 단계에서 검토 |
+| Hooks — auto-update-checker (플러그인 자동 업데이트) | npm 배포 후 필요. 세션 생성 시 npm registry 확인. omOs의 `createAutoUpdateCheckerHook` 참조 |
+| Hooks — apply-patch (패치 적용 도구) | **사용 안 함.** OpenCode 자체 patch 도구로 충분. omOs는 12개 파일로 구현되어 있으나 우리는 불필요 |
+| Hooks — chat-headers (커스텀 HTTP 헤더) | **사용 안 함.** Rate limit 처리 등에 사용하나 우리는 foreground-fallback에서 처리 예정 |
 
 ### npm 배포 전 필수 인프라 (omOs 대비 분석)
 

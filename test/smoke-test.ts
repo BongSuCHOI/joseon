@@ -63,19 +63,20 @@ try {
     assert(false, 'ensureHarnessDirs 2회째 에러 없음');
 }
 
-// === L1: logEvent 테스트 ===
+// === L1: logEvent 테스트 (logger redirect) ===
 console.log('\n=== L1: logEvent 테스트 ===');
 const testDate = new Date().toISOString().slice(0, 10);
 logEvent('tools', `${testDate}.jsonl`, { tool: 'bash', args: { command: 'echo hello' } });
 logEvent('tools', `${testDate}.jsonl`, { tool: 'write', args: { filePath: '/tmp/test.txt' } });
 
-const logPath = join(HARNESS_DIR, 'logs/tools', `${testDate}.jsonl`);
-assert(existsSync(logPath), '로그 파일 생성됨');
+const logPath = join(HARNESS_DIR, 'logs', 'harness.jsonl');
+assert(existsSync(logPath), 'harness.jsonl 로그 파일 생성됨');
 const logContent = readFileSync(logPath, 'utf-8').trim().split('\n');
-assert(logContent.length === 2, '2개 레코드 기록됨');
-const parsed = JSON.parse(logContent[0]);
-assert(parsed.tool === 'bash', '첫 레코드 tool=bash');
-assert(parsed._ts !== undefined, '타임스탬프 포함됨');
+assert(logContent.length >= 2, '2개 레코드 기록됨');
+const lastTwo = logContent.slice(-2);
+const parsed = JSON.parse(lastTwo[0]);
+assert(parsed.data?.tool === 'bash', '첫 레코드 tool=bash');
+assert(parsed.ts !== undefined, '타임스탬프 포함됨');
 
 // === L4: 수동 규칙 생성 + enforcer 로직 시뮬레이션 ===
 console.log('\n=== L4: HARD 규칙 테스트 ===');
