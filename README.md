@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | 🔧 진행 중 — 4a~4c 완료 + 프롬프트 개선 완료. 4D 대기 |
+| 4 | 오케스트레이션 | + orchestrator | 🔧 진행 중 — 4a~4D 완료. 4E 대기 |
 
 ### 핵심 원칙
 
@@ -98,6 +98,7 @@ SOFT 규칙 생성 (rules/soft/)
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 7개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
+| **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: session.idle Phase 정리 + 4개 플러그인 통합 진입점 (Step 4D) |
 
 ## 런타임 데이터
 
@@ -151,7 +152,7 @@ cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 
 ```
 src/
-├── index.ts                     # 플러그인 진입점 (observer + enforcer + improver 병합)
+├── index.ts                     # 플러그인 진입점 (observer + enforcer + improver + orchestrator 병합)
 ├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult 타입 정의
 ├── shared/
 │   ├── constants.ts             # HARNESS_DIR 경로 상수
@@ -162,6 +163,7 @@ src/
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
 │   └── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
 └── orchestrator/
+    ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D)
     ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
     ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션 (Step 4c)
     └── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)

@@ -94,3 +94,10 @@ observer, enforcer 모두 초기화 시 `ensureHarnessDirs()`를 호출한다.
 #### Scenario: Config callback registers agents
 - **WHEN** OpenCode가 플러그인을 로드하고 config 콜백을 호출함
 - **THEN** 모든 에이전트 정의가 `opencodeConfig.agent`에 병합되고 `default_agent`가 "orchestrator"로 설정됨
+
+### Requirement: Plugin entry point with orchestrator
+The plugin entry point `src/index.ts` SHALL merge Orchestrator hooks via `mergeEventHandlers` alongside existing observer, enforcer, and improver hooks.
+
+#### Scenario: All hooks merged
+- **WHEN** the plugin is loaded
+- **THEN** observer, enforcer, improver, AND orchestrator hooks SHALL all be active via mergeEventHandlers

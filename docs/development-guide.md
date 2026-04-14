@@ -427,3 +427,6 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-13 | Step 4c | smoke test — Error Recovery + QA (24/24) | ✅ | 에러 복구 5단계 진행, QA retry→escalate, 시나리오별 독립 추적 |
 | 2026-04-13 | Step 4c | 기존 Step 1/3/4a 회귀 | ✅ | 회귀 없음 |
 | 2026-04-14 | Step 4b | 프롬프트 품질 개선 (7개 전체) | ✅ | omOs+omO+agency-agents 기반 재작성. cross-reviewer→designer 교체. 빌드 성공 |
+| 2026-04-14 | Step 4D | npm run build | ✅ | orchestrator.ts + index.ts 통합 빌드 성공 |
+| 2026-04-14 | Step 4D | 기존 Step 1/3/4a/4c 회귀 | ✅ | 21+50+22+9+24=126 테스트 전원 통과 |
+| 2026-04-14 | Step 4D | 배포 동기화 | ✅ | .opencode/plugins/harness/에 orchestrator.ts 포함 동기화 |
