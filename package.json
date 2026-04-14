@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -R src/agents/prompts dist/agents/prompts",
+    "deploy": "rm -rf .opencode/plugins/harness && cp -R dist .opencode/plugins/harness",
     "dev": "tsc --watch"
   },
   "devDependencies": {
