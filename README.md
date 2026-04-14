@@ -171,7 +171,7 @@ src/
 │   ├── agents.ts                # 에이전트 빌더 + config 콜백 자동 등록 (Step 4b)
 │   └── prompts/                 # 7개 에이전트 프롬프트
 │       ├── orchestrator.md
-│       ├── build.md
+│       ├── builder.md
 │       ├── frontend.md
 │       ├── backend.md
 │       ├── tester.md
