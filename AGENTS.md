@@ -118,6 +118,9 @@ Orchestrator (최상위, 기본 에이전트)
 | fix: 커밋 패턴 추출 고도화 | 실동작에서 source_file 빈 문자열 이슈. git log 파싱 보강 + 파일 경로 정확도 개선 |
 | Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |
 | Cross-Project 자동 승격 | 2개 이상 프로젝트 운영 시. `global` 키워드 인프라는 이미 구축됨 (~80줄). 승격 기준 설계가 핵심 |
+| 에이전트별 도구 deny 리스트 | Step 4 완료 후 고도화 1차. agents.ts의 permission 필드를 `{ deny: ['file_edit', 'file_write', 'bash'] }` 형태로 확장. enforcer의 tool.execute.before에서 차단. 프롬프트(soft) + 기술적 제약(hard) 이중 통제 |
+| 스킬 allowedAgents 시스템 | 에이전트별 도구 deny 구현 후. 스킬 설치 시 접근 가능 에이전트 지정. omOs의 `allowedAgents` 패턴 |
+| agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
 
 ### 사용 안 함 (의식적 제외)
 
