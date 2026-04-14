@@ -1,4 +1,6 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["./.opencode/plugins/harness"]
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": [
+        "./.opencode/plugins/harness/index.ts"
+    ]
 }

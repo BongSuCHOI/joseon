@@ -54,7 +54,7 @@ export function createFrontendAgent(): AgentDefinition {
             temperature: 0.1,
         },
         mode: 'subagent',
-        hidden: true,
+        hidden: false,
     };
 }
 
@@ -67,7 +67,7 @@ export function createBackendAgent(): AgentDefinition {
             temperature: 0.1,
         },
         mode: 'subagent',
-        hidden: true,
+        hidden: false,
     };
 }
 
@@ -80,7 +80,7 @@ export function createTesterAgent(): AgentDefinition {
             temperature: 0.1,
         },
         mode: 'subagent',
-        hidden: true,
+        hidden: false,
     };
 }
 
@@ -120,7 +120,7 @@ export function createExplorerAgent(): AgentDefinition {
             temperature: 0.1,
         },
         mode: 'subagent',
-        hidden: true,
+        hidden: false,
     };
 }
 

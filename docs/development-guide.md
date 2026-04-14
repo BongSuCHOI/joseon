@@ -86,8 +86,8 @@ cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 ### 빠른 동기화 스크립트
 
 ```bash
-# src/ 변경사항을 로컬 플러그인에 싱크 (index.ts 제외)
-rsync -av --exclude='index.ts' src/ .opencode/plugins/harness/
+# src/ 변경사항을 로컬 플러그인에 싱크 (__tests__만 제외)
+rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
 ```
 
 ---

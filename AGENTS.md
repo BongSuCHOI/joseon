@@ -312,6 +312,8 @@ openspec/
 
 OpenCode는 `export default { id, server() }` 패턴(v1)을 사용한다. `export const PluginName = async (ctx) => {}` 패턴(legacy)도 동작하지만 명시적이지 않으므로 사용하지 않는다.
 
+**⚠️ 핵심:** SDK의 `PluginModule`은 `{ id, server, tui }`만 인식한다. `config`, `event`, `tool` 등 **모든 훅은 `server()`가 반환하는 Hooks 객체 안에** 있어야 한다. `PluginModule` 최상위에 두면 OpenCode가 호출하지 않는다.
+
 ```typescript
 // ✅ 올바른 패턴 (v1 — 반드시 이 방식 사용)
 // src/index.ts
@@ -321,13 +323,27 @@ export default {
     const ctx = { worktree: input.worktree };
     const observerHooks = await HarnessObserver(ctx);
     const enforcerHooks = await HarnessEnforcer(ctx);
-    return { ...observerHooks, ...enforcerHooks };
+    const result = { ...observerHooks, ...enforcerHooks };
+
+    // config, event 등 모든 훅은 server() 반환값(Hooks) 안에 넣는다
+    result.config = async (opencodeConfig) => {
+      // 에이전트 자동 등록 로직
+    };
+
+    return result;
   },
 };
 
 // ❌ legacy 패턴 (동작은 하지만 사용하지 않음)
 export const MyPlugin = async (ctx) => {
   return { "tool.execute.before": async (input, output) => { ... } };
+};
+
+// ❌ config를 PluginModule 최상위에 두면 OpenCode가 무시함
+export default {
+  id: "my-harness",
+  server: async (input) => { return { event: ... }; },
+  config: (cfg) => { ... },  // ← 절대 여기에 두지 말 것!
 };
 ```
 

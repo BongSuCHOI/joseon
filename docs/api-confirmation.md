@@ -2,8 +2,37 @@
 
 > **목적:** v3-final 가이드에 `⚠️ API 확인 필요`로 표시된 모든 필드의 실제 구조를 정리.
 > **출처:** OpenCode 공식 소스코드 직접 확인 (`packages/plugin/src/index.ts`, `packages/sdk/js/src/gen/types.gen.ts`, `packages/opencode/src/session/prompt.ts`, `packages/opencode/src/session/compaction.ts`)
-> **확인일:** 2026-04-11
+> **확인일:** 2026-04-11 (PluginModule 구조는 2026-04-14 업데이트)
 > **상태:** 전체 CONFIRMED (디버그 플러그인 불필요)
+
+---
+
+## 0. PluginModule vs Hooks 구조 (핵심)
+
+OpenCode SDK의 타입 구조상, `PluginModule`은 `{ id, server, tui }`만 인식한다.
+`config`, `event`, `tool`, `tool.execute.before` 등 **모든 훅은 `server()`가 반환하는 Hooks 객체의 프로퍼티**여야 한다.
+
+```typescript
+// SDK 타입 정의 (packages/plugin/src/index.ts)
+export type PluginModule = {
+    id?: string;
+    server: Plugin;   // Plugin = (input) => Promise<Hooks>
+    tui?: never;
+    // ← config, event, tool 등은 여기에 올 수 없음!
+};
+
+export type Hooks = {
+    event?: ...;
+    config?: (input: Config) => Promise<void>;  // ← 여기!
+    tool?: { [key: string]: ToolDefinition };
+    "tool.execute.before"?: ...;
+    "tool.execute.after"?: ...;
+    // ... 모든 훅은 Hooks 안에
+};
+```
+
+**실제 버그 사례:** `config`를 `PluginModule` 최상위에 두면 OpenCode가 아예 호출하지 않음.
+에이전트 등록, default_agent 설정이 전혀 실행되지 않는 치명적 버그 발생.
 
 ---
 

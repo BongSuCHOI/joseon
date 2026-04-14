@@ -28,27 +28,29 @@ export default {
     for (const [key, handler] of Object.entries(merged)) {
       result[key] = handler;
     }
-    return result;
-  },
 
-  // Step 4: 에이전트 자동 등록 (oh-my-opencode-slim 패턴)
-  config: (opencodeConfig: Record<string, unknown>) => {
-    const agents = createAgents();
+    // Step 4: 에이전트 자동 등록 (oh-my-opencode-slim 패턴)
+    // config는 Hooks의 프로퍼티여야 함 (PluginModule 최상위가 아님)
+    (result as Record<string, unknown>).config = async (opencodeConfig: Record<string, unknown>) => {
+      const agents = createAgents();
 
-    // 에이전트 병합 (shallow merge — 사용자 설정이 우선)
-    if (!opencodeConfig.agent) {
-      opencodeConfig.agent = {};
-    }
-    const agentMap = opencodeConfig.agent as Record<string, unknown>;
-    for (const agent of agents) {
-      if (!agentMap[agent.name]) {
-        agentMap[agent.name] = agent;
+      // 에이전트 병합 (shallow merge — 사용자 설정이 우선)
+      if (!opencodeConfig.agent) {
+        opencodeConfig.agent = {};
       }
-    }
+      const agentMap = opencodeConfig.agent as Record<string, unknown>;
+      for (const agent of agents) {
+        if (!agentMap[agent.name]) {
+          agentMap[agent.name] = agent;
+        }
+      }
 
-    // default_agent 설정 (사용자 미설정 시만)
-    if (!opencodeConfig.default_agent) {
-      opencodeConfig.default_agent = 'orchestrator';
-    }
+      // default_agent 설정 (사용자 미설정 시만)
+      if (!opencodeConfig.default_agent) {
+        opencodeConfig.default_agent = 'orchestrator';
+      }
+    };
+
+    return result;
   },
 };
