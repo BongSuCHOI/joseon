@@ -11,20 +11,24 @@ import type { AgentDefinition } from './agents/agents.js';
 import { loadConfig } from './config/index.js';
 import { createAllHooks } from './hooks/index.js';
 
-function buildMcpPermissions(allowedMcps: string[], allMcpNames: string[]): Record<string, string> {
-    const resolved = parseList(allowedMcps, allMcpNames);
+function buildMcpPermissions(allowedMcps: string[] | undefined, allMcpNames: string[]): Record<string, string> {
     const permissions: Record<string, string> = {};
+    if (allMcpNames.length === 0) return permissions;
+    const resolved = parseList(allowedMcps ?? [], allMcpNames);
     for (const mcp of allMcpNames) {
-        const key = `${mcp}_*`;
-        permissions[key] = resolved.includes(mcp) ? 'allow' : 'deny';
+        permissions[`${mcp}_*`] = resolved.includes(mcp) ? 'allow' : 'deny';
     }
     return permissions;
 }
 
-function buildSkillPermissions(allowedSkills: string[], allSkillNames: string[]): Record<string, string> {
-    const resolved = parseList(allowedSkills, allSkillNames);
+function buildSkillPermissions(allowedSkills: string[] | undefined, allSkillNames: string[]): Record<string, string> {
     const permissions: Record<string, string> = {};
-    if (resolved.length === 0) return permissions;
+    if (allSkillNames.length === 0) return permissions;
+    const resolved = parseList(allowedSkills ?? [], allSkillNames);
+    if (resolved.length === 0) {
+        permissions['skill'] = 'deny';
+        return permissions;
+    }
     permissions['skill'] = 'allow';
     if (!resolved.includes('*')) {
         for (const skill of allSkillNames) {
@@ -71,21 +75,17 @@ export default {
           const mergedPermission = { ...agent.permission };
 
           const overrides = agentOverrides[agent.name];
-          if (overrides?.mcps && allMcpNames.length > 0) {
-            const mcpPerms = buildMcpPermissions(overrides.mcps, allMcpNames);
-            for (const [key, value] of Object.entries(mcpPerms)) {
-              if (mergedPermission[key] === undefined) {
-                mergedPermission[key] = value;
-              }
+          const mcpPerms = buildMcpPermissions(overrides?.mcps, allMcpNames);
+          for (const [key, value] of Object.entries(mcpPerms)) {
+            if (mergedPermission[key] === undefined) {
+              mergedPermission[key] = value;
             }
           }
 
-          if (overrides?.skills && allSkillNames.length > 0) {
-            const skillPerms = buildSkillPermissions(overrides.skills, allSkillNames);
-            for (const [key, value] of Object.entries(skillPerms)) {
-              if (mergedPermission[key] === undefined) {
-                mergedPermission[key] = value;
-              }
+          const skillPerms = buildSkillPermissions(overrides?.skills, allSkillNames);
+          for (const [key, value] of Object.entries(skillPerms)) {
+            if (mergedPermission[key] === undefined) {
+              mergedPermission[key] = value;
             }
           }
 

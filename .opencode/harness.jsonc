@@ -115,19 +115,44 @@
     // 에이전트 확장 필드 예시 (B1+B2)
     // "agents": {
     //     "frontend": {
-    //         // model 배열 — FallbackChain 자동 구성
-    //         "model": ["model-a", "model-b"],
-    //         // variant — SDK 공식 지원 ("high"/"medium"/"low")
+    //         // model — 단일 문자열 또는 배열 (배열이면 첫 번째가 기본, 나머지는 FallbackChain)
+    //         "model": ["provider/model-a", "provider/model-b"],
+    //
+    //         // variant — OpenCode 1순위 필드. 모델 변종 지정 (e.g. "high", "medium", "low")
+    //         // 생략 시 OpenCode 기본값 사용
     //         "variant": "high",
-    //         // skills — `*`/`!name` 글로브 문법
-    //         "skills": ["*", "!find-skills"],
-    //         // mcps — MCP 접근 제어 (자동으로 permission.{mcp}_* 생성)
-    //         "mcps": ["websearch", "context7"],
-    //         // options — SDK에 직접 전달
-    //         "options": { "topP": 0.9, "maxTokens": 4096 },
-    //         // prompt — 커스텀 프롬프트 (파일 경로)
+    //
+    //         // temperature — OpenCode 1순위 필드. 0=결정적, 1=무작위
+    //         // 기본 정의값 사용 시 생략 가능
+    //         "temperature": 0.1,
+    //
+    //         // hidden — OpenCode 1순위 필드. true면 @메뉴에서 숨김
+    //         "hidden": false,
+    //
+    //         // skills — 접근 가능한 스킬 제어
+    //         //   생략/빈배열([]) → 모든 스킬 접근 차단 (기본)
+    //         //   ["*"]       → 모든 스킬 허용
+    //         //   ["a", "b"]  → a, b만 허용
+    //         //   ["*", "!x"] → x만 제외
+    //         "skills": ["*"],
+    //
+    //         // mcps — 접근 가능한 MCP 서버 제어 (위 skills와 동일 문법)
+    //         //   생략/빈배열 → 모든 MCP 접근 차단 (기본)
+    //         //   ["mcp1"]    → mcp1만 허용
+    //         //   ["*", "!mcp2"] → mcp2만 제외
+    //         "mcps": ["context7", "grep_app"],
+    //
+    //         // options — provider-specific 파라미터 passthrough
+    //         //   OpenCode가 인식하지 않는 키는 그대로 provider에 전달됨
+    //         //   e.g. OpenAI reasoningEffort, maxCompletionTokens 등
+    //         "options": { "reasoningEffort": "high" },
+    //
+    //         // prompt — 시스템 프롬프트 전체 교체 (파일 경로)
+    //         //   생략 시 플러그인 내장 프롬프트 사용
     //         "prompt": "/path/to/custom-prompt.md",
-    //         // append_prompt — 기존 프롬프트에 추가 (파일 경로)
+    //
+    //         // append_prompt — 기존 프롬프트 뒤에 추가 (파일 경로)
+    //         //   내장 프롬프트를 유지하면서 추가 지시를 덧붙일 때
     //         "append_prompt": "/path/to/extra-instructions.md",
     //     },
     // },
