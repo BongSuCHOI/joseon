@@ -33,6 +33,9 @@ Brief confirmation of changes applied.
 - file1.ts: Applied requested change
 - file2.ts: Applied requested change
 </changes>
+<verification>
+- LSP diagnostics: [clean/errors found]
+</verification>
 
 </Output_Format>
 
