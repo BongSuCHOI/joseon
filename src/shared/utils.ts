@@ -88,12 +88,15 @@ export function mergeEventHandlers(...hookObjects: HookObject[]): Record<string,
         if (handlerList.length === 1) {
             result[key] = handlerList[0];
         } else {
-            result[key] = async (input: unknown) => {
+            result[key] = async (...args: unknown[]) => {
                 for (const handler of handlerList) {
                     try {
-                        await handler(input);
+                        await handler(...args);
                     } catch (err) {
-                        logger.error('shared', 'merged event handler error', { key, error: err });
+                        logger.error('shared', 'merged event handler error', {
+                            key,
+                            error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
+                        });
                     }
                 }
             };
