@@ -52,6 +52,23 @@ function releaseSessionLock(projectKey: string): void {
     } catch { /* 정리 실패는 치명적이지 않음 */ }
 }
 
+function isUserInterrupt(err: unknown): boolean {
+    if (!err) return false;
+    const s = String(err).toLowerCase();
+    return s.includes('abort') || s.includes('interrupt') || s.includes('cancelled') || s.includes('user interrupt');
+}
+
+function extractErrorMessage(err: unknown): string {
+    if (!err) return '';
+    if (typeof err === 'string') return err.slice(0, 200);
+    if (err instanceof Error) return err.message?.slice(0, 200) || '';
+    const obj = err as Record<string, unknown>;
+    if (obj?.message && typeof obj.message === 'string') return obj.message.slice(0, 200);
+    const str = JSON.stringify(err);
+    if (str === '{}' || str === '""' || str === '[object Object]') return '';
+    return str.slice(0, 200);
+}
+
 export const HarnessObserver = async (ctx: { worktree: string }) => {
     ensureHarnessDirs();
 
@@ -94,14 +111,15 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
 
             // L2: 세션 에러 감지 + 반복 에러 카운팅
             if (event.type === 'session.error') {
-                const date = new Date().toISOString().slice(0, 10);
-                const err = (event.properties as { error?: { message?: string } })?.error;
-                const errorInfo = err?.message || String(err) || 'unknown';
-                const key = `session_error:${String(errorInfo).slice(0, 100)}`;
+                const err = (event.properties as { error?: unknown })?.error;
+                const errorInfo = extractErrorMessage(err);
+                if (!errorInfo || isUserInterrupt(err)) return;
+
+                const key = `session_error:${errorInfo.slice(0, 100)}`;
                 const count = (errorCounts.get(key) || 0) + 1;
                 errorCounts.set(key, count);
 
-                logger.error('observer', 'session_error', {
+                logger.warn('observer', 'session_error', {
                     sessionID: (event.properties as { sessionID?: string })?.sessionID,
                     error: errorInfo,
                     repeat_count: count,
@@ -112,7 +130,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                         type: 'error_repeat',
                         project_key: getProjectKey(ctx.worktree),
                         payload: {
-                            description: `세션 에러 ${count}회 반복: ${String(errorInfo).slice(0, 200)}`,
+                            description: `세션 에러 ${count}회 반복: ${errorInfo.slice(0, 200)}`,
                             pattern: key,
                             recurrence_count: count,
                         },

@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc && cp -R src/agents/prompts dist/agents/prompts",
-    "deploy": "rm -rf .opencode/plugins/harness && cp -R dist .opencode/plugins/harness",
+    "deploy": "rsync -av --delete --exclude='__tests__' src/ .opencode/plugins/harness/",
     "dev": "tsc --watch"
   },
   "devDependencies": {

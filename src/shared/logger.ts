@@ -40,12 +40,7 @@ function log(level: LogLevel, module: string, message: string, data?: Record<str
         // file write failure is not fatal
     }
 
-    const prefix = `[harness:${module}] ${level.toUpperCase()}: ${message}`;
-    if (data) {
-        process.stderr.write(`${prefix} ${JSON.stringify(data)}\n`);
-    } else {
-        process.stderr.write(`${prefix}\n`);
-    }
+
 }
 
 export const logger = {
