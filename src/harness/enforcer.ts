@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { Rule } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, isPluginSource } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 
@@ -19,7 +19,7 @@ function loadRules(type: 'soft' | 'hard', projectKey: string): Rule[] {
                 rules.push(rule);
             }
         } catch {
-            /* 파싱 실패한 규칙은 무시 */
+            // corrupted rule file — skip
         }
     }
     return rules;
@@ -115,7 +115,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
                 }
                 if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
                     const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
-                    if (safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH)) {
+                    if (filePath && !isPluginSource(filePath) && safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH)) {
                         throw new Error(
                             `[HARNESS HARD BLOCK] ${rule.description}\nRule: ${rule.id} | File: ${filePath}`,
                         );
@@ -135,7 +135,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
                 }
                 if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
                     const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
-                    matched = safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH);
+                    matched = !!filePath && !isPluginSource(filePath) && safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH);
                 }
                 if (matched) {
                     incrementViolation(rule);

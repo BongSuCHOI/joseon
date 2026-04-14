@@ -70,6 +70,11 @@ export function parseList(items: string[], allAvailable: string[]): string[] {
     return allow.filter(item => !deny.includes(item) && allAvailable.includes(item));
 }
 
+export function isPluginSource(filePath: string): boolean {
+    const normalized = filePath.replace(/\\/g, '/');
+    return normalized.includes('/src/') || normalized.includes('/.opencode/plugins/');
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EventHandler = (...args: any[]) => Promise<void> | void;
 type HookObject = Record<string, EventHandler | undefined>;

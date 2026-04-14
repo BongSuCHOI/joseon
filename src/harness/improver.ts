@@ -6,7 +6,7 @@ import {
 import { join } from 'path';
 import { execSync } from 'child_process';
 import type { Signal, Rule, ProjectState } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 
@@ -143,6 +143,18 @@ function signalToRule(signal: Signal, worktree: string): void {
             signal_id: signal.id,
             pattern,
             reason: 'invalid_or_too_broad_pattern',
+        });
+        return;
+    }
+
+    // skip rules targeting plugin source code (prevent self-blockade)
+    const sourceFile = signal.payload.source_file || '';
+    if (sourceFile && isPluginSource(sourceFile)) {
+        appendHistory('rule_rejected', {
+            signal_id: signal.id,
+            pattern,
+            reason: 'targets_plugin_source',
+            source_file: sourceFile,
         });
         return;
     }
