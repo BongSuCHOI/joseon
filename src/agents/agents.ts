@@ -132,6 +132,17 @@ function createCoderDef(): AgentDefinition {
     };
 }
 
+function createOracleDef(): AgentDefinition {
+    return {
+        name: 'oracle',
+        description: '수석 아키텍트 및 시스템 분석가 — 심층 분석, 아키텍처 자문, 복잡한 디버깅',
+        config: { prompt: loadPrompt('oracle.md'), temperature: 0.1 },
+        mode: 'subagent',
+        hidden: false,
+        permission: { file_edit: 'deny' },
+    };
+}
+
 export function createAgents(config?: HarnessConfig): AgentDefinition[] {
     const defs = [
         createOrchestratorDef(),
@@ -144,6 +155,7 @@ export function createAgents(config?: HarnessConfig): AgentDefinition[] {
         createExplorerDef(),
         createLibrarianDef(),
         createCoderDef(),
+        createOracleDef(),
     ];
     return defs.map((d) => applyOverrides(d, config?.agents?.[d.name]));
 }

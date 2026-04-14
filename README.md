@@ -182,13 +182,14 @@ src/
 │   └── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
 └── agents/
     ├── agents.ts                # 에이전트 빌더 + config 오버라이드 적용 (Step 4b)
-    └── prompts/                 # 10개 에이전트 프롬프트
+    └── prompts/                 # 11개 에이전트 프롬프트
         ├── orchestrator.md
         ├── builder.md
         ├── frontend.md
         ├── backend.md
         ├── tester.md
         ├── reviewer.md
+        ├── oracle.md
         ├── designer.md
         ├── explorer.md
         ├── librarian.md

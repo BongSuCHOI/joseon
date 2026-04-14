@@ -213,7 +213,8 @@ my-harness/
     │       ├── frontend.md          # frontend 서브에이전트
     │       ├── backend.md           # backend 서브에이전트
     │       ├── tester.md            # tester 서브에이전트
-    │       ├── reviewer.md          # reviewer 서브에이전트
+    │       ├── reviewer.md          # reviewer 서브에이전트 (코드 리뷰 전용)
+    │       ├── oracle.md            # oracle 서브에이전트 (심층 분석, 아키텍처 자문)
     │       └── coder.md             # coder 서브에이전트 (기계적 실행 전용)
     │
     ├── hooks/                       # 훅 모듈 (omO 패턴)
