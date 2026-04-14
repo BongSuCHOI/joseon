@@ -111,6 +111,32 @@ export function createDesignerAgent(): AgentDefinition {
     };
 }
 
+export function createExplorerAgent(): AgentDefinition {
+    return {
+        name: 'explorer',
+        description: '내부 코드베이스 검색 — 파일 위치, 코드 패턴, 심볼 참조 탐색',
+        config: {
+            prompt: loadPrompt('explorer.md'),
+            temperature: 0.1,
+        },
+        mode: 'subagent',
+        hidden: true,
+    };
+}
+
+export function createLibrarianAgent(): AgentDefinition {
+    return {
+        name: 'librarian',
+        description: '외부 문서/라이브러리 조사 — 공식 문서, GitHub 예시, 버전별 API 확인',
+        config: {
+            prompt: loadPrompt('librarian.md'),
+            temperature: 0.1,
+        },
+        mode: 'subagent',
+        hidden: false,
+    };
+}
+
 export function createAgents(): AgentDefinition[] {
     return [
         createOrchestratorAgent(),
@@ -120,5 +146,7 @@ export function createAgents(): AgentDefinition[] {
         createTesterAgent(),
         createReviewerAgent(),
         createDesignerAgent(),
+        createExplorerAgent(),
+        createLibrarianAgent(),
     ];
 }
