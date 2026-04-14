@@ -121,6 +121,7 @@ Orchestrator (최상위, 기본 에이전트)
 | 에이전트별 도구 deny 리스트 | Step 4 완료 후 고도화 1차. agents.ts의 permission 필드를 `{ deny: ['file_edit', 'file_write', 'bash'] }` 형태로 확장. enforcer의 tool.execute.before에서 차단. 프롬프트(soft) + 기술적 제약(hard) 이중 통제 |
 | 스킬 allowedAgents 시스템 | 에이전트별 도구 deny 구현 후. 스킬 설치 시 접근 가능 에이전트 지정. omOs의 `allowedAgents` 패턴 |
 | agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
+| Council 시스템 (council + councillor + council-master) | 다중 모델 환경(최소 2개 이상 서로 다른 모델) 구축 후. 단일 모델에서는 의미 없음. 중대한 아키텍처/보안 결정에만 사용. 질문당 3~5배 비용 |
 
 ### 사용 안 함 (의식적 제외)
 
