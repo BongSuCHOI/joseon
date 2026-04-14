@@ -132,15 +132,15 @@ Orchestrator (최상위, 기본 에이전트)
 
 ### npm 배포 전 필수 인프라 (omOs 대비 분석)
 
-현재 `src/`는 agents, harness, orchestrator, shared 4개 디렉토리. omOs는 11개. 로컬에서는 최소 구조로 충분하지만, npm 배포를 위해 다음이 필요:
+현재 `src/`는 agents, harness, orchestrator, shared, config, hooks 6개 디렉토리.
 
 #### 🔴 배포 전 필수
 
-| 항목 | 현재 상태 | 필요 작업 | omOs 참조 |
-|------|-----------|-----------|-----------|
-| **config 시스템** (`src/config/`) | agents.ts에 하드코딩 | Zod 스키마 + 설정 로더. 사용자가 에이전트별 모델/온도/프롬프트 오버라이드 가능하게 | `config/schema.ts`, `config/loader.ts`, `config/council-schema.ts` |
-| **hooks 보강** (`src/hooks/`) | 4개 (observer/enforcer/improver/signals) | delegate-task-retry, json-error-recovery 등 안정성 훅. 배포 환경에서 사용자 디버그 부담 최소화 | `hooks/` 15개 |
-| **구조화된 로깅** (`src/shared/`) | logEvent (JSONL append) | 로그 레벨, 필터링, 사용자 친화적 포맷. 이슈 리포트 디버깅에 필요 | `utils/logger.ts` |
+| 항목 | 상태 | 구현 내용 | omOs 참조 |
+|------|------|-----------|-----------|
+| **config 시스템** (`src/config/`) | ✅ 완료 | 수동 검증 + JSONC 로더 + 글로벌/프로젝트 병합. 에이전트별 model/temperature/hidden 오버라이드 가능 | `config/schema.ts`, `config/loader.ts` |
+| **hooks 보강** (`src/hooks/`) | ✅ 완료 | delegate-task-retry, json-error-recovery, delegation-nudge, phase-reminder (5개) | `hooks/` 15개 |
+| **구조화된 로깅** (`src/shared/logger.ts`) | ✅ 완료 | 4레벨(debug/info/warn/error) + HARNESS_LOG_LEVEL env + 통합 harness.jsonl + stderr 포맷 | `utils/logger.ts` |
 
 #### 🟡 배포 준비 단계
 
@@ -257,7 +257,7 @@ openspec/
 
 ```
 /src/
-├── index.ts                     # 플러그인 re-export (진입점)
+├── index.ts                     # 플러그인 진입점 (모듈 병합 + config 로드 + hooks 통합)
 │
 ├── harness/                     # 하네스 레이어 (Step 1~2)
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환
@@ -266,13 +266,15 @@ openspec/
 │
 ├── orchestrator/                # 오케스트레이션 레이어 (Step 4)
 │   ├── orchestrator.ts          # Plugin 4: Phase 관리 + 태스크 분배
-│   └── phase-manager.ts         # Phase 상태 파일 관리 + Phase 2.5 gate
+│   ├── phase-manager.ts         # Phase 상태 파일 관리 + Phase 2.5 gate
+│   ├── error-recovery.ts        # 에러 복구 5단계 로직
+│   └── qa-tracker.ts            # QA 실패 추적 + 반복 검출
 │
 ├── agents/                      # 에이전트 정의 (Step 4)
-│   ├── agents.ts                # 에이전트 빌더 + 등록 로직
+│   ├── agents.ts                # 에이전트 빌더 + config 오버라이드 적용
 │   └── prompts/                 # 에이전트별 시스템 프롬프트
 │       ├── orchestrator.md      # orchestrator 에이전트 프롬프트
-│       ├── builder.md            # builder (Phase PM) 서브에이전트
+│       ├── builder.md           # builder (Phase PM) 서브에이전트
 │       ├── frontend.md          # frontend 서브에이전트
 │       ├── backend.md           # backend 서브에이전트
 │       ├── tester.md            # tester 서브에이전트
@@ -281,27 +283,24 @@ openspec/
 │       ├── explorer.md          # explorer 서브에이전트 (내부 코드베이스 검색)
 │       └── librarian.md         # librarian 서브에이전트 (외부 문서/라이브러리 조사)
 │
-├── hooks/                       # 훅 모듈 (omO 패턴)
-│   ├── index.ts                 # 훅 등록 배럴 export
-│   ├── tool-logger.ts           # tool.execute.after 로깅
-│   ├── rule-enforcer.ts         # tool.execute.before 차단
-│   ├── signal-detector.ts       # event 기반 신호 감지
-│   └── compaction-injector.ts   # experimental.session.compacting 컨텍스트 주입
-│
-├── tools/                       # 커스텀 도구 (Step 2 확장)
-│   ├── index.ts                 # 도구 등록 배럴 export
-│   ├── harness-status.ts        # 하네스 상태 조회 도구
-│   └── harness-eval.ts          # 하네스 평가 실행 도구
+├── hooks/                       # 훅 모듈 — npm 인프라 A3
+│   ├── index.ts                 # createAllHooks() + 다중 핸들러 병합
+│   ├── delegate-task-retry.ts   # 서브에이전트 위임 실패 감지 + 재시도 가이드
+│   ├── json-error-recovery.ts   # JSON 파싱 에러 감지 + 수정 프롬프트 주입
+│   ├── post-file-tool-nudge.ts  # 파일 조작 후 위임 넛지
+│   ├── post-read-nudge.ts       # 파일 읽기 후 위임 넛지
+│   └── phase-reminder.ts        # builder 에이전트 Phase 리마인더
 │
 ├── shared/                      # 공통 유틸리티
 │   ├── index.ts                 # 배럴 export
 │   ├── utils.ts                 # getProjectKey, ensureHarnessDirs, generateId
-│   ├── file-io.ts               # logEvent, 파일 읽기/쓰기 헬퍼
+│   ├── logger.ts                # 구조화된 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
 │   └── constants.ts             # HARNESS_DIR, 디렉토리 경로 상수
 │
-├── config/                      # 설정 스키마
-│   ├── index.ts                 # 설정 로더
-│   └── schema.ts                # Zod 기반 설정 유효성 검증
+├── config/                      # 설정 시스템 — npm 인프라 A2
+│   ├── index.ts                 # 배럴 export
+│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
+│   └── loader.ts                # JSONC/JSON 파일 로더 + 글로벌/프로젝트 병합
 │
 └── types.ts                     # Signal, Rule, ProjectState 등 전체 타입
 ```
@@ -324,16 +323,25 @@ OpenCode는 `export default { id, server() }` 패턴(v1)을 사용한다. `expor
 ```typescript
 // ✅ 올바른 패턴 (v1 — 반드시 이 방식 사용)
 // src/index.ts
+import { loadConfig } from './config/index.js';
+import { createAgents } from './agents/agents.js';
+import { createAllHooks } from './hooks/index.js';
+
 export default {
   id: "my-harness",
   server: async (input) => {
     const ctx = { worktree: input.worktree };
+    const harnessConfig = loadConfig(input.worktree || input.directory || process.cwd());
     const observerHooks = await HarnessObserver(ctx);
-    const enforcerHooks = await HarnessEnforcer(ctx);
-    const result = { ...observerHooks, ...enforcerHooks };
+    const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);
+    const improverHooks = await HarnessImprover(ctx, harnessConfig);
+    const orchestratorHooks = await HarnessOrchestrator(ctx);
+    const extraHooks = createAllHooks();
+    const result = mergeAllHooks(observerHooks, enforcerHooks, improverHooks, orchestratorHooks, extraHooks);
 
-    // config, event 등 모든 훅은 server() 반환값(Hooks) 안에 넣는다
+    // config는 server() 반환값(Hooks) 안에 넣는다
     result.config = async (opencodeConfig) => {
+      const agents = createAgents(harnessConfig);
       // 에이전트 자동 등록 로직
     };
 

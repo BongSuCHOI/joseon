@@ -18,25 +18,36 @@
 ├── shared/
 │   ├── constants.ts
 │   ├── utils.ts          # getProjectKey, ensureHarnessDirs, logEvent, generateId, mergeEventHandlers
+│   ├── logger.ts         # 구조화된 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
 │   └── index.ts
+├── config/               # A2: 설정 시스템
+│   ├── schema.ts         # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
+│   ├── loader.ts         # JSONC/JSON 로더 + 글로벌/프로젝트 병합
+│   └── index.ts
+├── hooks/                # A3: 훅 모듈
+│   ├── delegate-task-retry.ts
+│   ├── json-error-recovery.ts
+│   ├── post-file-tool-nudge.ts
+│   ├── post-read-nudge.ts
+│   ├── phase-reminder.ts
+│   └── index.ts          # createAllHooks()
 ├── harness/
 │   ├── observer.ts
 │   ├── enforcer.ts
 │   └── improver.ts       # Step 2 추가: L5 자가개선 + L6 폐루프
-└── orchestrator/
-    └── phase-manager.ts  # Step 4a 추가: Phase 상태 관리 + Phase 2.5 gate
+├── orchestrator/
+│   ├── orchestrator.ts
+│   ├── phase-manager.ts
+│   ├── error-recovery.ts
+│   └── qa-tracker.ts
+└── agents/
+    ├── agents.ts
+    └── prompts/
 ```
 
-**Step 3 추가 사항:**
-- `shared/utils.ts`에 `rotateHistoryIfNeeded()` 추가 (history.jsonl 로테이션)
-- `ensureHarnessDirs()`에 `memory/facts/`, `memory/archive/` 추가
-- `harness/improver.ts`에 `syncRulesMarkdown()`, `indexSessionFacts()`, `searchFacts()` 추가
-- `.opencode/rules/`에 `harness-soft-rules.md`, `harness-hard-rules.md` 자동 생성/갱신
-
-**Step 4a 추가 사항:**
-- `types.ts`에 `PhaseState`, `PhaseHistoryEntry`, `QAFailures`, `EvalResult` 인터페이스 추가. `Signal`에 `agent_id?: string` 추가
-- `orchestrator/phase-manager.ts` 신규: `getPhaseState`, `transitionPhase` (Phase 2.5 gate 포함), `resetPhase`
-- `harness/observer.ts`에 PID 세션 락 추가: `acquireSessionLock` (session.created), `releaseSessionLock` (session.idle)
+**설정 파일:**
+- 프로젝트: `.opencode/harness.jsonc` — 에이전트 model/temperature/hidden + 하네스 임계값 오버라이드
+- 글로벌: `~/.config/opencode/harness.jsonc` — 모든 프로젝트에 적용 (프로젝트 설정이 우선)
 
 **핵심 규칙:**
 - `package.json`에 `"type": "module"` 필수
@@ -90,10 +101,6 @@ cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
 ```
 
----
-
-## 3. tmux 자동화 테스트
-
 OpenCode는 TUI 앱이므로 tmux를 사용해서 자동화 테스트를 실행한다.
 
 ### 기본 패턴
@@ -119,8 +126,8 @@ tmux new-session -d -s harness-test -c /Users/choibongsu/projects/harness-orches
 tmux send-keys -t harness-test "opencode --prompt 'package.json 파일 내용을 보여줘'" Enter
 sleep 10 && tmux capture-pane -t harness-test -p
 
-# 확인: 오늘 날짜의 JSONL 파일에 도구 실행 로그가 있어야 함
-cat ~/.config/opencode/harness/logs/tools/$(date +%Y-%m-%d).jsonl | tail -3
+# 확인: 통합 로그 파일에 도구 실행 로그가 있어야 함
+cat ~/.config/opencode/harness/logs/harness.jsonl | tail -3
 
 tmux kill-session -t harness-test
 ```
@@ -432,3 +439,15 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-14 | Step 4D | 배포 동기화 | ✅ | .opencode/plugins/harness/에 orchestrator.ts 포함 동기화 |
 | 2026-04-14 | Step 4E | 통합 스모크 테스트 | ✅ | 121/121 통과 (Phase Manager + Error Recovery + QA Tracker + Agent Registration + Orchestrator Plugin) |
 | 2026-04-14 | Step 4E | 전체 회귀 (Step 1+3+4) | ✅ | 기존 테스트 전원 통과 |
+| 2026-04-14 | A1 | 구조화된 로깅 구현 | ✅ | logger.ts 신규 + 전 모듈 console.error/warn → logger 교체 (6곳) |
+| 2026-04-14 | A1 | logEvent → logger 리다이렉트 | ✅ | 기존 logEvent 호출은 harness.jsonl로 자동 리다이렉트 |
+| 2026-04-14 | A1 | HARNESS_LOG_LEVEL 환경변수 | ✅ | debug/info/warn/error 4레벨, 기본 info |
+| 2026-04-14 | A2 | Config 시스템 구현 | ✅ | schema.ts + loader.ts 신규. JSONC 파싱 + 글로벌/프로젝트 병합 |
+| 2026-04-14 | A2 | 에이전트 config 오버라이드 | ✅ | agents.ts applyOverrides()로 model/temperature/hidden 오버라이드 |
+| 2026-04-14 | A2 | enforcer/improver/error-recovery/qa-tracker config 연동 | ✅ | 각 모듈에 settings 파라미터 전달 |
+| 2026-04-14 | A3 | Hooks 보강 (5개) | ✅ | delegate-task-retry, json-error-recovery, post-file-tool-nudge, post-read-nudge, phase-reminder |
+| 2026-04-14 | A3 | createAllHooks() + 다중 핸들러 병합 | ✅ | hooks/index.ts에서 createAllHooks()로 일괄 생성 |
+| 2026-04-14 | A1~A3 | 전체 스모크 테스트 (247/247) | ✅ | smoke 21 + step3 50 + step4 121 + error-recovery 24 + phase-manager 22 + session-lock 9 |
+| 2026-04-14 | A1~A3 | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-14 | A1~A3 | 로컬 플러그인 동기화 | ✅ | rsync로 src/ → .opencode/plugins/harness/ 싱크 |
+| 2026-04-14 | A1~A3 | harness.jsonc 설정 파일 생성 | ✅ | .opencode/harness.jsonc에 에이전트 model/temperature/hidden + 임계값 |

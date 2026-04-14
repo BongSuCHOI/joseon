@@ -37,12 +37,12 @@
 - **WHEN** 디렉토리가 이미 존재하는 상태에서 `ensureHarnessDirs()`를 호출함
 - **THEN** 에러 없이 정상 완료됨
 
-### Requirement: logEvent appends JSONL records
-`shared/utils.ts`의 `logEvent(category, filename, data)`는 지정된 카테고리 디렉토리에 JSONL 레코드를 append한다.
+### Requirement: logEvent appends JSONL records (deprecated)
+`shared/utils.ts`의 `logEvent(category, filename, data)`는 `@deprecated` 마크되며, 내부적으로 `logger.info()`로 redirect한다. category는 data 객체에 `_category` 필드로 보존된다.
 
 #### Scenario: Log entry is appended with timestamp
 - **WHEN** `logEvent('tools', '2026-04-11.jsonl', { tool: 'bash' })`를 호출함
-- **THEN** `~/.config/opencode/harness/logs/tools/2026-04-11.jsonl`에 `{ "tool": "bash", "_ts": "..." }` + 개행이 append됨
+- **THEN** `harness.jsonl`에 `{"level":"info","module":"legacy","msg":"logEvent","data":{"tool":"bash","_category":"tools","_filename":"2026-04-11.jsonl"},"ts":"..."}` 레코드가 append됨
 
 ### Requirement: generateId returns UUID
 `shared/utils.ts`의 `generateId()`는 `import { randomUUID } from 'crypto'`를 사용하여 UUID를 생성한다.
@@ -100,4 +100,11 @@ The plugin entry point `src/index.ts` SHALL merge Orchestrator hooks via `mergeE
 
 #### Scenario: All hooks merged
 - **WHEN** the plugin is loaded
-- **THEN** observer, enforcer, improver, AND orchestrator hooks SHALL all be active via mergeEventHandlers
+- **THEN** observer, enforcer, improver, orchestrator, AND extra hooks (delegate-task-retry, json-error-recovery, delegation-nudge, phase-reminder) SHALL all be active via mergeEventHandlers
+
+### Requirement: Plugin entry point merges all extra hooks
+`src/index.ts`의 `server()` 함수는 `src/hooks/index.ts`에서 생성한 모든 훅을 기존 observer/enforcer/improver/orchestrator 훅과 함께 `mergeEventHandlers`로 병합한다.
+
+#### Scenario: Multiple tool.execute.after handlers coexist
+- **WHEN** observer의 tool.execute.after와 hooks의 tool.execute.after가 모두 등록됨
+- **THEN** 두 핸들러 모두 순차적으로 실행됨 (한쪽이 다른 쪽을 덮어쓰지 않음)

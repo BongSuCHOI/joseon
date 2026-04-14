@@ -99,6 +99,8 @@ SOFT 규칙 생성 (rules/soft/)
 | **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
 | **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: session.idle Phase 정리 + 4개 플러그인 통합 진입점 (Step 4D) |
+| **config** | `src/config/` | JSONC/JSON 설정 로더 + 글로벌/프로젝트 병합 + 에이전트 오버라이드 |
+| **hooks** | `src/hooks/` | 위임 재시도, JSON 에러 복구, 파일/읽기 넛지, Phase 리마인더 |
 
 ## 런타임 데이터
 
@@ -107,26 +109,29 @@ SOFT 규칙 생성 (rules/soft/)
 ```
 ~/.config/opencode/harness/
 ├── logs/
-│   ├── sessions/          # 세션 로그 + session_start 타임스탬프
-│   ├── tools/             # 도구 실행 로그 (JSONL)
-│   └── errors/            # 에러 로그 (JSONL)
+│   ├── harness.jsonl       # 통합 로그 (구조화된 로깅, 4레벨)
+│   ├── sessions/           # 세션 로그 + session_start 타임스탬프
+│   └── errors/             # 에러 로그 (JSONL)
 ├── signals/
-│   ├── pending/           # 대기 중인 signal
-│   └── ack/               # 처리 완료된 signal
+│   ├── pending/            # 대기 중인 signal
+│   └── ack/                # 처리 완료된 signal
 ├── rules/
-│   ├── soft/              # SOFT 규칙 (위반 추적만)
-│   ├── hard/              # HARD 규칙 (실행 차단)
-│   └── history.jsonl      # 규칙 생성/승격 이력
-├── scaffold/              # scaffold 파일 (global.md)
+│   ├── soft/               # SOFT 규칙 (위반 추적만)
+│   ├── hard/               # HARD 규칙 (실행 차단)
+│   └── history.jsonl       # 규칙 생성/승격 이력
+├── scaffold/               # scaffold 파일 (global.md)
 ├── memory/
-│   ├── facts/             # Memory Index — 추출된 키워드 fact
-│   └── archive/           # 세션 아카이브
+│   ├── facts/              # Memory Index — 추출된 키워드 fact
+│   └── archive/            # 세션 아카이브
 ├── projects/
 │   ├── {key}/
-│   │   ├── state.json     # 프로젝트 상태
-│   │   └── .session-lock  # PID 세션 락 (동시 실행 방지)
+│   │   ├── state.json      # 프로젝트 상태
+│   │   └── .session-lock   # PID 세션 락 (동시 실행 방지)
 │   └── ...
-└── memory/archive/        # 세션 아카이브
+
+# 설정 파일 (JSONC 우선 + JSON 폴백)
+~/.config/opencode/harness.jsonc          # 글로벌 설정
+{project}/.opencode/harness.jsonc         # 프로젝트 설정 (우선)
 
 # Phase 상태 (프로젝트 worktree 내부)
 {project}/.opencode/orchestrator-phase.json   # Phase 1~5 상태 + 이력
@@ -139,11 +144,7 @@ SOFT 규칙 생성 (rules/soft/)
 npm run build
 
 # 소스 수정 후 로컬 플러그인에 동기화
-cp src/index.ts .opencode/plugins/harness/index.ts
-cp src/types.ts .opencode/plugins/harness/types.ts
-cp -r src/shared/ .opencode/plugins/harness/shared/
-cp -r src/harness/ .opencode/plugins/harness/harness/
-cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
+rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
 ```
 
 자세한 개발/테스트 절차는 [`docs/development-guide.md`](docs/development-guide.md)를 참조.
@@ -152,33 +153,45 @@ cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
 
 ```
 src/
-├── index.ts                     # 플러그인 진입점 (observer + enforcer + improver + orchestrator 병합)
+├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
 ├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult 타입 정의
+├── config/                      # A2: 설정 시스템
+│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
+│   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
+│   └── index.ts                 # 배럴 export
+├── hooks/                       # A3: 훅 모듈
+│   ├── delegate-task-retry.ts    # 서브에이전트 위임 실패 감지 + 재시도 가이드
+│   ├── json-error-recovery.ts    # JSON 파싱 에러 감지 + 수정 프롬프트 주입
+│   ├── post-file-tool-nudge.ts   # 파일 조작 후 위임 넛지
+│   ├── post-read-nudge.ts        # 파일 읽기 후 위임 넛지
+│   ├── phase-reminder.ts         # builder 에이전트 Phase 리마인더
+│   └── index.ts                  # createAllHooks() + 핸들러 병합
 ├── shared/
 │   ├── constants.ts             # HARNESS_DIR 경로 상수
-│   ├── utils.ts                 # getProjectKey, ensureHarnessDirs, logEvent, mergeEventHandlers, rotateHistoryIfNeeded
+│   ├── utils.ts                 # getProjectKey, ensureHarnessDirs, mergeEventHandlers, rotateHistoryIfNeeded
+│   ├── logger.ts                # 구조화된 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
 │   └── index.ts                 # 배럴 export
 ├── harness/
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
 │   └── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
-└── orchestrator/
-    ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D)
-    ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
-    ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션 (Step 4c)
-    └── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
-├── agents/
-│   ├── agents.ts                # 에이전트 빌더 + config 콜백 자동 등록 (Step 4b)
-│   └── prompts/                 # 9개 에이전트 프롬프트
-│       ├── orchestrator.md
-│       ├── builder.md
-│       ├── frontend.md
-│       ├── backend.md
-│       ├── tester.md
-│       ├── reviewer.md
-│       ├── designer.md
-│       ├── explorer.md
-│       └── librarian.md
+├── orchestrator/
+│   ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D)
+│   ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
+│   ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션 (Step 4c)
+│   └── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
+└── agents/
+    ├── agents.ts                # 에이전트 빌더 + config 오버라이드 적용 (Step 4b)
+    └── prompts/                 # 9개 에이전트 프롬프트
+        ├── orchestrator.md
+        ├── builder.md
+        ├── frontend.md
+        ├── backend.md
+        ├── tester.md
+        ├── reviewer.md
+        ├── designer.md
+        ├── explorer.md
+        └── librarian.md
 ```
 
 ## 참고
