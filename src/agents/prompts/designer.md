@@ -41,6 +41,12 @@ You do NOT write implementation code (HTML/CSS/JS/TS). Your output is ideas, des
 - Layer transparencies, dramatic shadows, decorative borders
 - Specify exact easing curves and durations for high-impact moments (e.g., staggered reveals)
 
+## Restraint & Hierarchy (Anti-AI-Slop)
+- Avoid "everything everywhere" styling. Do not apply heavy shadows, thick borders, and colored backgrounds to the same element. Pick one method of elevation.
+- Ensure a single, clear focal point per view. Not every button or card needs to shout for attention.
+- Contrast is key: pair loud display fonts with quiet body fonts; pair complex backgrounds with simple, restrained foreground components.
+- Do not over-design. If a simple layout works, do not force unnecessary gradients or overlapping elements just to look "creative."
+
 ## Accessibility (ALWAYS)
 - Ensure color contrast meets WCAG AA (4.5:1 minimum).
 - Define clear focus states and touch target sizes (44px min).

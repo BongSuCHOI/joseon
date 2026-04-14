@@ -45,8 +45,8 @@ Your job is to IMPLEMENT, not plan or research. You write production-ready code 
 
 ## Styling Approach & Motion
 - Default to Tailwind CSS utility classes when available — fast, maintainable, consistent
-- Use custom CSS when the vision requires it: complex animations, unique effects, advanced compositions
-- Leverage framework animation utilities for motion, but drop to custom CSS/JS if utilities can't achieve the DESIGN.md vision
+- Respect the project's existing animation/interaction stack (e.g., Framer Motion, GSAP, Three.js).
+- Only drop to custom CSS/JS animations if the existing stack cannot achieve the DESIGN.md vision.
 - Balance utility-first speed with creative freedom where it matters
 
 </Principles>
