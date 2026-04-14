@@ -96,7 +96,7 @@ function createReviewerDef(): AgentDefinition {
 function createDesignerDef(): AgentDefinition {
     return {
         name: 'designer',
-        description: 'UI/UX design, review, and implementation specialist',
+        description: 'UI/UX 기획 및 디자인 시스템 설계자 — 아이디어 제안, DESIGN.md 작성, 시각적 리뷰 (코드 작성 X)',
         config: { prompt: loadPrompt('designer.md'), temperature: 0.7 },
         mode: 'subagent',
         hidden: false,
