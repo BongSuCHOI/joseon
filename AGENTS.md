@@ -123,6 +123,26 @@ Orchestrator (최상위, 기본 에이전트)
 | agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
 | Council 시스템 (council + councillor + council-master) | 다중 모델 환경(최소 2개 이상 서로 다른 모델) 구축 후. 단일 모델에서는 의미 없음. 중대한 아키텍처/보안 결정에만 사용. 질문당 3~5배 비용 |
 
+### npm 배포 전 필수 인프라 (omOs 대비 분석)
+
+현재 `src/`는 agents, harness, orchestrator, shared 4개 디렉토리. omOs는 11개. 로컬에서는 최소 구조로 충분하지만, npm 배포를 위해 다음이 필요:
+
+#### 🔴 배포 전 필수
+
+| 항목 | 현재 상태 | 필요 작업 | omOs 참조 |
+|------|-----------|-----------|-----------|
+| **config 시스템** (`src/config/`) | agents.ts에 하드코딩 | Zod 스키마 + 설정 로더. 사용자가 에이전트별 모델/온도/프롬프트 오버라이드 가능하게 | `config/schema.ts`, `config/loader.ts`, `config/council-schema.ts` |
+| **hooks 보강** (`src/hooks/`) | 4개 (observer/enforcer/improver/signals) | delegate-task-retry, json-error-recovery 등 안정성 훅. 배포 환경에서 사용자 디버그 부담 최소화 | `hooks/` 15개 |
+| **구조화된 로깅** (`src/shared/`) | logEvent (JSONL append) | 로그 레벨, 필터링, 사용자 친화적 포맷. 이슈 리포트 디버깅에 필요 | `utils/logger.ts` |
+
+#### 🟡 배포 준비 단계
+
+| 항목 | 내용 | omOs 참조 |
+|------|------|-----------|
+| **모델 자동 감지/라우팅** | 사용자 환경의 가용 모델 감지 + 에이전트별 자동 할당 | `cli/model-selection.ts`, `cli/dynamic-model-selection.ts` |
+| **MCP 설정 가이드** | 필요한 MCP 서버(context7, grep_app 등)를 설정에 선언적으로 정의. 플러그인이 MCP를 등록할 수 없으므로 문서 또는 postinstall 안내 | `mcp/`, `config/agent-mcps.ts` |
+| **서브에이전트 깊이 추적** | 다중 세션 환경에서 깊이 제한. 에러 복구 cross_model_rescue에서 필요 가능성 | `background/subagent-depth.ts` |
+
 ### 사용 안 함 (의식적 제외)
 
 | 항목 | 이유 |
