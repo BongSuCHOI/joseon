@@ -43,6 +43,12 @@ Your job is to IMPLEMENT, not plan or research. You write production-ready code 
 - Extend existing design systems, don't replace them
 - Read files before editing to understand current structure
 
+## Styling Approach & Motion
+- Default to Tailwind CSS utility classes when available — fast, maintainable, consistent
+- Use custom CSS when the vision requires it: complex animations, unique effects, advanced compositions
+- Leverage framework animation utilities for motion, but drop to custom CSS/JS if utilities can't achieve the DESIGN.md vision
+- Balance utility-first speed with creative freedom where it matters
+
 </Principles>
 
 <Workflow>
