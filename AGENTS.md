@@ -245,7 +245,10 @@ openspec/
 │       ├── frontend.md          # frontend 서브에이전트
 │       ├── backend.md           # backend 서브에이전트
 │       ├── tester.md            # tester 서브에이전트
-│       └── reviewer.md          # reviewer 서브에이전트
+│       ├── reviewer.md          # reviewer 서브에이전트 (코드 리뷰 + 아키텍처 자문)
+│       ├── designer.md          # designer 서브에이전트 (UI/UX)
+│       ├── explorer.md          # explorer 서브에이전트 (내부 코드베이스 검색)
+│       └── librarian.md         # librarian 서브에이전트 (외부 문서/라이브러리 조사)
 │
 ├── hooks/                       # 훅 모듈 (omO 패턴)
 │   ├── index.ts                 # 훅 등록 배럴 export
