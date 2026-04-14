@@ -272,7 +272,7 @@ openspec/
 │
 ├── agents/                      # 에이전트 정의 (Step 4)
 │   ├── agents.ts                # 에이전트 빌더 + config 오버라이드 적용
-│   └── prompts/                 # 에이전트별 시스템 프롬프트
+│   └── prompts/                 # 10개 에이전트 프롬프트
 │       ├── orchestrator.md      # orchestrator 에이전트 프롬프트
 │       ├── builder.md           # builder (Phase PM) 서브에이전트
 │       ├── frontend.md          # frontend 서브에이전트
@@ -281,7 +281,8 @@ openspec/
 │       ├── reviewer.md          # reviewer 서브에이전트 (코드 리뷰 + 아키텍처 자문)
 │       ├── designer.md          # designer 서브에이전트 (UI/UX)
 │       ├── explorer.md          # explorer 서브에이전트 (내부 코드베이스 검색)
-│       └── librarian.md         # librarian 서브에이전트 (외부 문서/라이브러리 조사)
+│       ├── librarian.md         # librarian 서브에이전트 (외부 문서/라이브러리 조사)
+│       └── coder.md             # coder 서브에이전트 (기계적 실행 전용)
 │
 ├── hooks/                       # 훅 모듈 — npm 인프라 A3
 │   ├── index.ts                 # createAllHooks() + 다중 핸들러 병합

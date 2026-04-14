@@ -122,6 +122,16 @@ function createLibrarianDef(): AgentDefinition {
     };
 }
 
+function createCoderDef(): AgentDefinition {
+    return {
+        name: 'coder',
+        description: '기계적 실행 전용 서브에이전트 — 단순 다중 파일 수정, 일괄 변경, 빠른 타이핑',
+        config: { prompt: loadPrompt('coder.md'), temperature: 0.1 },
+        mode: 'subagent',
+        hidden: false,
+    };
+}
+
 export function createAgents(config?: HarnessConfig): AgentDefinition[] {
     const defs = [
         createOrchestratorDef(),
@@ -133,6 +143,7 @@ export function createAgents(config?: HarnessConfig): AgentDefinition[] {
         createDesignerDef(),
         createExplorerDef(),
         createLibrarianDef(),
+        createCoderDef(),
     ];
     return defs.map((d) => applyOverrides(d, config?.agents?.[d.name]));
 }
