@@ -2,6 +2,8 @@
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId, logger } from '../shared/index.js';
+import { getHarnessSettings } from '../config/index.js';
+import { SubagentDepthTracker } from '../orchestrator/subagent-depth.js';
 
 function emitSignal(signal: Record<string, unknown>): void {
     const id = generateId();
@@ -11,11 +13,8 @@ function emitSignal(signal: Record<string, unknown>): void {
     );
 }
 
-// ── PID 세션 차단 유틸리티 ──
-
 function isProcessRunning(pid: number): boolean {
     try {
-        // signal 0 = 생존 확인만 (실제 시그널 전송 없음)
         process.kill(pid, 0);
         return true;
     } catch {
@@ -34,7 +33,6 @@ function acquireSessionLock(projectKey: string): void {
                 logger.warn('observer', 'Session already active', { pid: lockData.pid });
                 return;
             }
-            // Stale lock — PID가 죽었으므로 교체
         } catch {
             // 손상된 lock 파일 — 교체
         }
@@ -74,9 +72,10 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
 
     const projectKey = getProjectKey(ctx.worktree);
     const errorCounts = new Map<string, number>();
+    const harnessSettings = getHarnessSettings();
+    const depthTracker = new SubagentDepthTracker(harnessSettings.max_subagent_depth);
 
     return {
-        // L1: 도구 실행 후 기록 (순수 로깅만 담당)
         'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output?: { title?: string; output?: string }) => {
             const date = new Date().toISOString().slice(0, 10);
             logger.info('observer', 'tool executed', {
@@ -87,20 +86,30 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
             });
         },
 
-        // L1 + L2: 이벤트 수신
         event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
-            // Step 2: 세션 시작 타임스탬프 기록 (improver의 fix: 커밋 감지에서 사용)
             if (event.type === 'session.created') {
                 const sessionID = (event.properties as { sessionID?: string })?.sessionID || 'unknown';
                 writeFileSync(
                     join(HARNESS_DIR, 'logs/sessions', `session_start_${projectKey}.json`),
                     JSON.stringify({ timestamp: new Date().toISOString(), sessionID }, null, 2),
                 );
-                // PID 세션 락 획득
                 acquireSessionLock(projectKey);
             }
 
-            // 세션 완료 로깅 + PID 락 해제
+            if (event.type === 'subagent.session.created') {
+                const props = event.properties as { sessionID?: string; parentSessionID?: string } | undefined;
+                if (props?.sessionID && props?.parentSessionID) {
+                    depthTracker.registerChild(props.parentSessionID, props.sessionID);
+                }
+            }
+
+            if (event.type === 'session.deleted') {
+                const sessionID = (event.properties as { sessionID?: string })?.sessionID;
+                if (sessionID) {
+                    depthTracker.cleanup(sessionID);
+                }
+            }
+
             if (event.type === 'session.idle') {
                 logger.info('observer', 'session_idle', {
                     event: 'session_idle',
@@ -109,7 +118,6 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                 releaseSessionLock(projectKey);
             }
 
-            // L2: 세션 에러 감지 + 반복 에러 카운팅
             if (event.type === 'session.error') {
                 const err = (event.properties as { error?: unknown })?.error;
                 const errorInfo = extractErrorMessage(err);
@@ -138,7 +146,6 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                 }
             }
 
-            // 파일 편집 감지 — Step 1에서는 로깅만. Step 2에서 fix: 커밋 학습에 사용.
             if (event.type === 'file.edited') {
                 logger.info('observer', 'file_edited', {
                     event: 'file_edited',
@@ -146,7 +153,6 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                 });
             }
 
-            // 사용자 메시지에서 불만 키워드 감지
             if (event.type === 'message.part.updated') {
                 const { part } = event.properties as { part: { type: string; text?: string; messageID: string } };
                 if (part.type === 'text') {

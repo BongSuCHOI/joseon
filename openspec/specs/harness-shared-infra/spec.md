@@ -108,3 +108,14 @@ The plugin entry point `src/index.ts` SHALL merge Orchestrator hooks via `mergeE
 #### Scenario: Multiple tool.execute.after handlers coexist
 - **WHEN** observer의 tool.execute.after와 hooks의 tool.execute.after가 모두 등록됨
 - **THEN** 두 핸들러 모두 순차적으로 실행됨 (한쪽이 다른 쪽을 덮어쓰지 않음)
+
+---
+
+## ADDED Requirements
+
+### Requirement: parseList utility exported from shared
+`src/shared/utils.ts`의 `parseList()` 함수는 shared 배럴 인덱스를 통해 export된다.
+
+#### Scenario: Import parseList from shared
+- **WHEN** 다른 모듈에서 `import { parseList } from '../shared/index.js'`를 호출함
+- **THEN** `parseList` 함수가 사용 가능함

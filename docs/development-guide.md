@@ -451,3 +451,15 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-14 | A1~A3 | npm run build | ✅ | 타입 에러 없음 |
 | 2026-04-14 | A1~A3 | 로컬 플러그인 동기화 | ✅ | rsync로 src/ → .opencode/plugins/harness/ 싱크 |
 | 2026-04-14 | A1~A3 | harness.jsonc 설정 파일 생성 | ✅ | .opencode/harness.jsonc에 에이전트 model/temperature/hidden + 임계값 |
+| 2026-04-15 | B1+B2 | AgentOverrideConfig 확장 | ✅ | ModelEntry, variant, skills, mcps, options, prompt, append_prompt, FallbackConfig |
+| 2026-04-15 | B1+B2 | parseList() 유틸리티 | ✅ | `*`/`!name` 글로브 문법으로 skills/mcps 파싱 |
+| 2026-04-15 | B1+B2 | applyOverrides 리팩토링 | ✅ | model 배열, FallbackChain, 커스텀 프롬프트, options, variant |
+| 2026-04-15 | B1+B2 | MCP/Skills permission 자동 생성 | ✅ | config 콜백에서 mcps→permission.{mcp}_* 자동 설정 |
+| 2026-04-15 | B1+B2 | 전체 스모크 테스트 (232/232) | ✅ | smoke 29 + step3 50 + step4 153 |
+| 2026-04-15 | B1+B2 | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-15 | B3 | SubagentDepthTracker 구현 | ✅ | 메모리 Map 기반 depth 추적, max 초과 시 등록 거부 + logger.warn |
+| 2026-04-15 | B3 | Observer에 depthTracker 통합 | ✅ | subagent.session.created/deleted 이벤트에 registerChild/cleanup 연동 |
+| 2026-04-15 | B3 | HarnessSettings.max_subagent_depth | ✅ | schema.ts에 설정 추가, 기본값 3 |
+| 2026-04-15 | B3 | smoke test — SubagentDepthTracker (8/8) | ✅ | 등록/깊이조회/cleanup/cleanupAll/max초과차단/커스텀maxDepth |
+| 2026-04-15 | B3 | 전체 스모크 테스트 (248/248) | ✅ | smoke 29 + step3 50 + step4 169 |
+| 2026-04-15 | B3 | npm run build | ✅ | 타입 에러 없음 |

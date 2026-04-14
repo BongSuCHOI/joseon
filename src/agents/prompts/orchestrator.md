@@ -71,7 +71,7 @@ Parse request: explicit requirements + implicit needs.
 1. **Self**: single-file <20 lines, concepts, config, quick scripts
 2. **Specialist direct**: single-domain focused task (bug fix, component, endpoint) → @frontend, @backend, or @tester. No cross-domain coordination needed.
 3. **@coder**: multi-file but mechanical (renaming, boilerplate, known-fix propagation). Parallelize when files are independent.
-4. **@builder**: cross-domain, multi-phase, new features, large refactors → Phase 1~5
+4. **@builder**: multi-step phased work (new features, large refactors, sequential dependencies with verification) → Phase 1~5. Applies when no external spec tool (e.g. OpenSpec, Superpowers) is managing the workflow.
 
 ### Non-implementation routing
 - Internal search → @explorer

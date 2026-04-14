@@ -144,11 +144,12 @@ Orchestrator (최상위, 기본 에이전트)
 
 #### 🟡 배포 준비 단계
 
-| 항목 | 내용 | omOs 참조 |
-|------|------|-----------|
-| **모델 자동 감지/라우팅** | 사용자 환경의 가용 모델 감지 + 에이전트별 자동 할당 | `cli/model-selection.ts`, `cli/dynamic-model-selection.ts` |
-| **MCP 설정 가이드** | 필요한 MCP 서버(context7, grep_app 등)를 설정에 선언적으로 정의. 플러그인이 MCP를 등록할 수 없으므로 문서 또는 postinstall 안내 | `mcp/`, `config/agent-mcps.ts` |
-| **서브에이전트 깊이 추적** | 다중 세션 환경에서 깊이 제한. 에러 복구 cross_model_rescue에서 필요 가능성 | `background/subagent-depth.ts` |
+| 항목 | 내용 | omOs 참조 | 상태 |
+|------|------|-----------|------|
+| **에이전트 설정 확장 (B1+B2)** | AgentOverrideConfig 확장: variant, skills, mcps, options, prompt, append_prompt, model 배열, FallbackChain, parseList() | `config/agent-config-handler.ts` | ✅ 완료 |
+| **서브에이전트 깊이 추적 (B3)** | SubagentDepthTracker: max depth 초과 시 차단 | `background/subagent-depth.ts` | ✅ 완료 |
+| **모델 자동 감지/라우팅** | 사용자 환경의 가용 모델 감지 + 에이전트별 자동 할당 | `cli/model-selection.ts`, `cli/dynamic-model-selection.ts` | 미시작 |
+| **MCP 설정 가이드** | 필요한 MCP 서버(context7, grep_app 등)를 설정에 선언적으로 정의. 플러그인이 MCP를 등록할 수 없으므로 문서 또는 postinstall 안내 | `mcp/`, `config/agent-mcps.ts` | 미시작 |
 
 ### 사용 안 함 (의식적 제외)
 

@@ -70,4 +70,32 @@
         "scaffold_match_ratio": 0.6,
         "search_max_results": 10,
     },
+
+    // FallbackChain — 다중 모델 환경에서 rate limit 시 자동 전환
+    // "fallback": {
+    //     "enabled": true,
+    //     "chains": {
+    //         "backend": ["primary-model", "fallback-model-1", "fallback-model-2"],
+    //     },
+    // },
+
+    // 에이전트 확장 필드 예시 (B1+B2)
+    // "agents": {
+    //     "frontend": {
+    //         // model 배열 — FallbackChain 자동 구성
+    //         "model": ["model-a", "model-b"],
+    //         // variant — SDK 공식 지원 ("high"/"medium"/"low")
+    //         "variant": "high",
+    //         // skills — `*`/`!name` 글로브 문법
+    //         "skills": ["*", "!find-skills"],
+    //         // mcps — MCP 접근 제어 (자동으로 permission.{mcp}_* 생성)
+    //         "mcps": ["websearch", "context7"],
+    //         // options — SDK에 직접 전달
+    //         "options": { "topP": 0.9, "maxTokens": 4096 },
+    //         // prompt — 커스텀 프롬프트 (파일 경로)
+    //         "prompt": "/path/to/custom-prompt.md",
+    //         // append_prompt — 기존 프롬프트에 추가 (파일 경로)
+    //         "append_prompt": "/path/to/extra-instructions.md",
+    //     },
+    // },
 }

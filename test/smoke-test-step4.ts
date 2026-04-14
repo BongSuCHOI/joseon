@@ -9,6 +9,7 @@ import { getPhaseState, transitionPhase, resetPhase } from '../src/orchestrator/
 import { attemptRecovery } from '../src/orchestrator/error-recovery.js';
 import { trackQAFailure } from '../src/orchestrator/qa-tracker.js';
 import { createAgents } from '../src/agents/agents.js';
+import { SubagentDepthTracker } from '../src/orchestrator/subagent-depth.js';
 import plugin from '../src/index.js';
 import { HARNESS_DIR } from '../src/shared/index.js';
 
@@ -187,10 +188,10 @@ try {
     // ============================================================
     console.log('\n--- 4. Agent Registration Integration ---\n');
 
-    // 4-1. createAgents() 호출 → 9개 에이전트
-    console.log('[4-1] createAgents() — 9개 에이전트 반환');
+    // 4-1. createAgents() 호출 → 11개 에이전트
+    console.log('[4-1] createAgents() — 11개 에이전트 반환');
     const agents = createAgents();
-    assert(agents.length === 9, `에이전트 9개 (실제: ${agents.length})`);
+    assert(agents.length === 11, `에이전트 11개 (실제: ${agents.length})`);
 
     // 4-2. 필수 필드 검증
     console.log('\n[4-2] 필수 필드 검증');
@@ -204,7 +205,7 @@ try {
 
     // 4-3. 에이전트 이름 검증
     console.log('\n[4-3] 에이전트 이름 검증');
-    const expectedNames = ['orchestrator', 'builder', 'frontend', 'backend', 'tester', 'reviewer', 'designer', 'explorer', 'librarian'];
+    const expectedNames = ['orchestrator', 'builder', 'frontend', 'backend', 'tester', 'reviewer', 'designer', 'explorer', 'librarian', 'coder', 'advisor'];
     const actualNames = agents.map(a => a.name);
     for (const expected of expectedNames) {
         assert(actualNames.includes(expected), `에이전트 "${expected}" 존재`);
@@ -239,6 +240,108 @@ try {
     assert(designer?.config.temperature === 0.7, 'designer: temperature === 0.7');
 
     // ============================================================
+    // 4B. Agent Override Extension Tests
+    // ============================================================
+    console.log('\n--- 4B. Agent Override Extension ---\n');
+
+    // 4B-1. model 배열 (FallbackChain)
+    console.log('[4B-1] model 배열 → _modelArray + 첫 모델');
+    const chainAgents = createAgents({
+        agents: {
+            frontend: { model: ['model-a', 'model-b', 'model-c'] },
+        },
+    });
+    const chainFrontend = chainAgents.find(a => a.name === 'frontend')!;
+    assert(chainFrontend._modelArray?.length === 3, '_modelArray 길이 === 3');
+    assert(chainFrontend._modelArray?.[0] === 'model-a', '_modelArray[0] === model-a');
+    assert(chainFrontend.config.model === 'model-a', 'config.model === 첫 번째 모델');
+
+    // 4B-2. ModelEntry 배열
+    console.log('\n[4B-2] ModelEntry 배열 → id 추출');
+    const entryAgents = createAgents({
+        agents: {
+            backend: { model: [{ id: 'gpt-5', variant: 'high' }, 'claude-sonnet'] },
+        },
+    });
+    const entryBackend = entryAgents.find(a => a.name === 'backend')!;
+    assert(entryBackend._modelArray?.[0] === 'gpt-5', 'ModelEntry: id 추출');
+    assert(entryBackend._modelArray?.[1] === 'claude-sonnet', 'ModelEntry + string 혼합');
+
+    // 4B-3. FallbackChain 구성: _modelArray 우선 > fallback.chains
+    console.log('\n[4B-3] FallbackChain 구성 (model 배열 우선)');
+    const fbAgents1 = createAgents({
+        agents: { frontend: { model: ['a', 'b', 'c'] } },
+        fallback: { chains: { frontend: ['x', 'y'] } },
+    });
+    const fbFrontend1 = fbAgents1.find(a => a.name === 'frontend')!;
+    assert(JSON.stringify(fbFrontend1._fallbackChain) === JSON.stringify(['a', 'b', 'c']), 'model 배열이 fallback.chains보다 우선');
+
+    // 4B-4. FallbackChain: model 단일 → fallback.chains 사용
+    console.log('\n[4B-4] FallbackChain 구성 (fallback.chains 사용)');
+    const fbAgents2 = createAgents({
+        fallback: { chains: { backend: ['x', 'y'] } },
+    });
+    const fbBackend2 = fbAgents2.find(a => a.name === 'backend')!;
+    assert(JSON.stringify(fbBackend2._fallbackChain) === JSON.stringify(['x', 'y']), 'model 단일 → fallback.chains 사용');
+
+    // 4B-5. FallbackChain: 둘 다 없음 → undefined
+    console.log('\n[4B-5] FallbackChain 구성 (둘 다 없음)');
+    const noFbAgents = createAgents();
+    const noFbFrontend = noFbAgents.find(a => a.name === 'frontend')!;
+    assert(noFbFrontend._fallbackChain === undefined, '둘 다 없으면 _fallbackChain === undefined');
+
+    // 4B-6. variant 오버라이드
+    console.log('\n[4B-6] variant 오버라이드');
+    const variantAgents = createAgents({
+        agents: { tester: { variant: 'high' } },
+    });
+    const variantTester = variantAgents.find(a => a.name === 'tester')!;
+    assert(variantTester.config.variant === 'high', 'variant === high');
+
+    // 4B-7. options 오버라이드
+    console.log('\n[4B-7] options 오버라이드');
+    const optionsAgents = createAgents({
+        agents: { coder: { options: { topP: 0.9, maxTokens: 4096 } } },
+    });
+    const optionsCoder = optionsAgents.find(a => a.name === 'coder')!;
+    assert(optionsCoder.config.options?.topP === 0.9, 'options.topP === 0.9');
+    assert(optionsCoder.config.options?.maxTokens === 4096, 'options.maxTokens === 4096');
+
+    // 4B-8. prompt 파일 없음 → 기본 프롬프트 유지 (경고만)
+    console.log('\n[4B-8] prompt 파일 없음 → 기본 유지');
+    const noFileAgents = createAgents({
+        agents: { explorer: { prompt: '/nonexistent/prompt.md' } },
+    });
+    const noFileExplorer = noFileAgents.find(a => a.name === 'explorer')!;
+    assert(noFileExplorer.config.prompt.length > 0, '존재하지 않는 프롬프트 파일 → 기본 프롬프트 유지');
+
+    // ============================================================
+    // 4C. Permission Auto-Generation Tests (pure function level)
+    // ============================================================
+    console.log('\n--- 4C. Permission Auto-Generation ---\n');
+
+    // 4C-1. createAgents returns proper structure for permission merge
+    console.log('[4C-1] createAgents — permission 필드 구조 검증');
+    const permAgents = createAgents();
+    const permReviewer = permAgents.find(a => a.name === 'reviewer')!;
+    assert(permReviewer.permission?.file_edit === 'deny', 'reviewer: file_edit === deny (기존 permission 유지)');
+    const permAdvisor = permAgents.find(a => a.name === 'advisor')!;
+    assert(permAdvisor.permission?.file_edit === 'deny', 'advisor: file_edit === deny (기존 permission 유지)');
+    const permOrch = permAgents.find(a => a.name === 'orchestrator')!;
+    assert(permOrch.permission === undefined, 'orchestrator: permission 없음 (기본값)');
+
+    // 4C-2. config callback — 기본 agent 등록 + default_agent 검증
+    console.log('\n[4C-2] config callback — agent 등록 + permission 보존');
+    const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
+    assert(typeof serverResult.config === 'function', 'config가 함수');
+    const cbConfig: Record<string, unknown> = {};
+    await serverResult.config(cbConfig);
+    const cbAgentMap = cbConfig.agent as Record<string, any>;
+    assert(cbAgentMap.reviewer.permission?.file_edit === 'deny', 'config callback: reviewer file_edit deny 보존');
+    assert(cbAgentMap.advisor.permission?.file_edit === 'deny', 'config callback: advisor file_edit deny 보존');
+    assert(cbConfig.default_agent === 'orchestrator', 'default_agent === orchestrator');
+
+    // ============================================================
     // 5. Orchestrator Plugin Integration
     // ============================================================
     console.log('\n--- 5. Orchestrator Plugin Integration ---\n');
@@ -251,18 +354,72 @@ try {
     console.log('\n[5-2] 플러그인 server');
     assert(typeof plugin.server === 'function', 'server가 함수');
 
-    // 5-3. 플러그인 config 검증
-    console.log('\n[5-3] 플러그인 config');
-    const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
-    assert(typeof serverResult.config === 'function', 'config가 함수');
+    // 5-3. 플러그인 config 검증 (기본 동작은 4C에서 이미 검증)
+    console.log('\n[5-3] 플러그인 config — 추가 에이전트 등록 확인');
     const testConfig: Record<string, unknown> = {};
     await serverResult.config(testConfig);
-    assert(testConfig.default_agent === 'orchestrator', 'default_agent === orchestrator');
     const agentMap = testConfig.agent as Record<string, unknown>;
     assert(agentMap !== undefined && agentMap !== null, 'agent 객체가 설정됨');
-    assert(typeof agentMap.orchestrator === 'object', 'orchestrator 에이전트 등록됨');
     assert(typeof agentMap.builder === 'object', 'builder 에이전트 등록됨');
     assert(typeof agentMap.designer === 'object', 'designer 에이전트 등록됨');
+    assert(typeof agentMap.coder === 'object', 'coder 에이전트 등록됨');
+    assert(typeof agentMap.advisor === 'object', 'advisor 에이전트 등록됨');
+
+    // ============================================================
+    // 6. Subagent Depth Tracker Tests
+    // ============================================================
+    console.log('\n--- 6. Subagent Depth Tracker ---\n');
+
+    // 6-1. 기본 깊이 초기값
+    console.log('[6-1] 기본 깊이 — 루트는 depth 0');
+    const tracker1 = new SubagentDepthTracker();
+    assert(tracker1.getDepth('unknown-session') === 0, '알 수 세션 depth === 0');
+    assert(tracker1.maxDepth === 3, '기본 maxDepth === 3');
+
+    // 6-2. 자식 등록
+    console.log('\n[6-2] 자식 등록 — depth 1');
+    const ok = tracker1.registerChild('root', 'child-1');
+    assert(ok === true, '첫 자식 등록 성공');
+    assert(tracker1.getDepth('child-1') === 1, 'child-1 depth === 1');
+
+    // 6-3. 손자 등록
+    console.log('\n[6-3] 손자 등록 — depth 2');
+    const ok2 = tracker1.registerChild('child-1', 'grandchild-1');
+    assert(ok2 === true, '손자 등록 성공');
+    assert(tracker1.getDepth('grandchild-1') === 2, 'grandchild depth === 2');
+
+    // 6-4. depth 3 등록 (max=3이므로 허용)
+    console.log('\n[6-4] depth 3 등록 — max=3이므로 허용');
+    const ok3 = tracker1.registerChild('grandchild-1', 'greatgrandchild');
+    assert(ok3 === true, 'depth 3 등록 성공 (max=3)');
+    assert(tracker1.getDepth('greatgrandchild') === 3, 'greatgrandchild depth === 3');
+
+    // 6-4b. depth 4 초과 차단
+    console.log('\n[6-4b] max depth 초과 — depth 4 차단');
+    const ok3b = tracker1.registerChild('greatgrandchild', 'lvl4');
+    assert(ok3b === false, 'depth 4 초과 → 등록 거부');
+
+    // 6-5. cleanup
+    console.log('\n[6-5] cleanup');
+    tracker1.cleanup('child-1');
+    assert(tracker1.getDepth('child-1') === 0, 'cleanup 후 depth === 0');
+    assert(tracker1.getDepth('grandchild-1') === 2, '손자는 cleanup 불가 (부모만 cleanup)');
+
+    // 6-6. cleanupAll
+    console.log('\n[6-6] cleanupAll');
+    tracker1.cleanupAll();
+    assert(tracker1.getDepth('grandchild-1') === 0, 'cleanupAll 후 모든 depth === 0');
+
+    // 6-7. 커스텀 max depth
+    console.log('\n[6-7] 커스텀 max depth');
+    const tracker2 = new SubagentDepthTracker(2);
+    assert(tracker2.maxDepth === 2, '커스텀 maxDepth === 2');
+    const ok4 = tracker2.registerChild('root', 'c1');
+    assert(ok4 === true, 'max=2: depth 1 등록 성공');
+    const ok5 = tracker2.registerChild('c1', 'c2');
+    assert(ok5 === true, 'max=2: depth 2 등록 성공');
+    const ok6 = tracker2.registerChild('c2', 'c3');
+    assert(ok6 === false, 'max=2: depth 3 초과 → 등록 거부');
 
     // ============================================================
     // 결과 요약

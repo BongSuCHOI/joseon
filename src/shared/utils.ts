@@ -61,6 +61,15 @@ export function rotateHistoryIfNeeded(historyPath: string, maxBytes?: number): v
     } catch { /* 로테이션 실패는 치명적이지 않음 */ }
 }
 
+export function parseList(items: string[], allAvailable: string[]): string[] {
+    if (!items || items.length === 0) return [];
+    const allow = items.filter(i => !i.startsWith('!'));
+    const deny = items.filter(i => i.startsWith('!')).map(i => i.slice(1));
+    if (deny.includes('*')) return [];
+    if (allow.includes('*')) return allAvailable.filter(item => !deny.includes(item));
+    return allow.filter(item => !deny.includes(item) && allAvailable.includes(item));
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EventHandler = (...args: any[]) => Promise<void> | void;
 type HookObject = Record<string, EventHandler | undefined>;

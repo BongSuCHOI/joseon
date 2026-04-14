@@ -5,10 +5,36 @@ import { HarnessObserver } from './harness/observer.js';
 import { HarnessEnforcer } from './harness/enforcer.js';
 import { HarnessImprover } from './harness/improver.js';
 import { HarnessOrchestrator } from './orchestrator/orchestrator.js';
-import { mergeEventHandlers } from './shared/index.js';
+import { mergeEventHandlers, parseList } from './shared/index.js';
 import { createAgents } from './agents/agents.js';
+import type { AgentDefinition } from './agents/agents.js';
 import { loadConfig } from './config/index.js';
 import { createAllHooks } from './hooks/index.js';
+
+function buildMcpPermissions(allowedMcps: string[], allMcpNames: string[]): Record<string, string> {
+    const resolved = parseList(allowedMcps, allMcpNames);
+    const permissions: Record<string, string> = {};
+    for (const mcp of allMcpNames) {
+        const key = `${mcp}_*`;
+        permissions[key] = resolved.includes(mcp) ? 'allow' : 'deny';
+    }
+    return permissions;
+}
+
+function buildSkillPermissions(allowedSkills: string[], allSkillNames: string[]): Record<string, string> {
+    const resolved = parseList(allowedSkills, allSkillNames);
+    const permissions: Record<string, string> = {};
+    if (resolved.length === 0) return permissions;
+    permissions['skill'] = 'allow';
+    if (!resolved.includes('*')) {
+        for (const skill of allSkillNames) {
+            if (!resolved.includes(skill)) {
+                permissions[`skill.${skill}`] = 'deny';
+            }
+        }
+    }
+    return permissions;
+}
 
 export default {
   id: "my-harness",
@@ -21,35 +47,52 @@ export default {
     const orchestratorHooks = await HarnessOrchestrator(ctx);
     const extraHooks = createAllHooks();
 
-    // v3 버그 C1 수정: 스프레드 대신 mergeEventHandlers로 event 훅 병합
-    // (스프레드 연산자는 나중 것이 앞의 것을 덮어씀)
     const allHooks = [observerHooks, enforcerHooks, improverHooks, orchestratorHooks, extraHooks];
     const merged = mergeEventHandlers(...allHooks);
 
-    // non-event 훅은 스프레드로 안전하게 합치고, event는 병합된 것 사용
     const result: Record<string, unknown> = { ...observerHooks, ...enforcerHooks, ...improverHooks, ...orchestratorHooks };
-    // 병합된 event 훅으로 덮어쓰기
     for (const [key, handler] of Object.entries(merged)) {
       result[key] = handler;
     }
 
-    // Step 4: 에이전트 자동 등록 (oh-my-opencode-slim 패턴)
-    // config는 Hooks의 프로퍼티여야 함 (PluginModule 최상위가 아님)
     (result as Record<string, unknown>).config = async (opencodeConfig: Record<string, unknown>) => {
       const agents = createAgents(harnessConfig);
+      const agentOverrides = harnessConfig?.agents ?? {};
 
-      // 에이전트 병합 (shallow merge — 사용자 설정이 우선)
+      const allMcpNames = extractKnownMcpNames(opencodeConfig);
+      const allSkillNames = extractKnownSkillNames(opencodeConfig);
+
       if (!opencodeConfig.agent) {
         opencodeConfig.agent = {};
       }
       const agentMap = opencodeConfig.agent as Record<string, unknown>;
       for (const agent of agents) {
         if (!agentMap[agent.name]) {
-          agentMap[agent.name] = agent;
+          const mergedPermission = { ...agent.permission };
+
+          const overrides = agentOverrides[agent.name];
+          if (overrides?.mcps && allMcpNames.length > 0) {
+            const mcpPerms = buildMcpPermissions(overrides.mcps, allMcpNames);
+            for (const [key, value] of Object.entries(mcpPerms)) {
+              if (mergedPermission[key] === undefined) {
+                mergedPermission[key] = value;
+              }
+            }
+          }
+
+          if (overrides?.skills && allSkillNames.length > 0) {
+            const skillPerms = buildSkillPermissions(overrides.skills, allSkillNames);
+            for (const [key, value] of Object.entries(skillPerms)) {
+              if (mergedPermission[key] === undefined) {
+                mergedPermission[key] = value;
+              }
+            }
+          }
+
+          agentMap[agent.name] = { ...agent, permission: mergedPermission };
         }
       }
 
-      // default_agent 설정 (사용자 미설정 시만)
       if (!opencodeConfig.default_agent) {
         opencodeConfig.default_agent = 'orchestrator';
       }
@@ -58,3 +101,19 @@ export default {
     return result;
   },
 };
+
+function extractKnownMcpNames(opencodeConfig: Record<string, unknown>): string[] {
+    const mcp = (opencodeConfig.mcp ?? {}) as Record<string, unknown>;
+    const serverMap = (mcp.server ?? {}) as Record<string, unknown>;
+    return Object.keys(serverMap).filter(k => typeof k === 'string' && k.length > 0);
+}
+
+function extractKnownSkillNames(opencodeConfig: Record<string, unknown>): string[] {
+    const skills = opencodeConfig.skill;
+    if (!skills || typeof skills !== 'object' || !Array.isArray(skills)) return [];
+    return (skills as unknown[]).map(s => {
+        if (typeof s === 'string') return s;
+        if (typeof s === 'object' && s !== null && 'name' in s) return String((s as { name: unknown }).name);
+        return null;
+    }).filter((s): s is string => s !== null && s.length > 0);
+}

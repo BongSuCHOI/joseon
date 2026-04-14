@@ -1,7 +1,23 @@
+export interface ModelEntry {
+    id: string;
+    variant?: string;
+}
+
 export interface AgentOverrideConfig {
-    model?: string;
+    model?: string | Array<string | ModelEntry>;
     temperature?: number;
     hidden?: boolean;
+    variant?: string;
+    skills?: string[];
+    mcps?: string[];
+    options?: Record<string, unknown>;
+    prompt?: string;
+    append_prompt?: string;
+}
+
+export interface FallbackConfig {
+    enabled?: boolean;
+    chains?: Record<string, string[]>;
 }
 
 export interface HarnessSettings {
@@ -12,11 +28,13 @@ export interface HarnessSettings {
     regex_max_length?: number;
     scaffold_match_ratio?: number;
     search_max_results?: number;
+    max_subagent_depth?: number;
 }
 
 export interface HarnessConfig {
     agents?: Record<string, AgentOverrideConfig>;
     harness?: HarnessSettings;
+    fallback?: FallbackConfig;
 }
 
 export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
@@ -27,6 +45,7 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     regex_max_length: 10000,
     scaffold_match_ratio: 0.6,
     search_max_results: 10,
+    max_subagent_depth: 3,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

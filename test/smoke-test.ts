@@ -6,7 +6,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 // shared 모듈 직접 import 테스트
-import { getProjectKey, ensureHarnessDirs, logEvent, generateId, HARNESS_DIR } from '../src/shared/index.js';
+import { getProjectKey, ensureHarnessDirs, logEvent, generateId, HARNESS_DIR, parseList } from '../src/shared/index.js';
 import type { Rule, Signal } from '../src/types.js';
 
 let passed = 0;
@@ -154,6 +154,20 @@ assert(promptRule.violation_count === 0, 'scope:prompt 규칙 violation_count �
 console.log('\n=== .env 차단 테스트 ===');
 assert(/git\s+(add|commit).*\.env/.test('git add .env') === true, 'git add .env 매칭');
 assert(/git\s+(add|commit).*\.env/.test('git add src/main.ts') === false, '일반 파일 비매칭');
+
+// === parseList 테스트 ===
+console.log('\n=== parseList 테스트 ===');
+
+const allItems = ['websearch', 'context7', 'grep_app', 'playwright'];
+
+assert(JSON.stringify(parseList(['*'], allItems)) === JSON.stringify(allItems), 'parseList: * → 전체 허용');
+assert(parseList(['!*'], allItems).length === 0, 'parseList: !* → 전체 거부');
+assert(JSON.stringify(parseList(['websearch', 'context7'], allItems)) === JSON.stringify(['websearch', 'context7']), 'parseList: 명시적 2개');
+assert(JSON.stringify(parseList(['*', '!grep_app'], allItems)) === JSON.stringify(['websearch', 'context7', 'playwright']), 'parseList: * + !exclude');
+assert(parseList([], allItems).length === 0, 'parseList: 빈 배열 → 빈 결과');
+assert(parseList(['nonexistent'], allItems).length === 0, 'parseList: 존재하지 않는 항목 → 빈 결과');
+assert(parseList(['websearch', '!websearch'], allItems).length === 0, 'parseList: allow + deny 동일 → 빈 결과');
+assert(JSON.stringify(parseList(['*'], [])) === JSON.stringify([]), 'parseList: * with empty available → 빈 결과');
 
 // === 정리 ===
 console.log('\n=== 테스트 결과 ===');

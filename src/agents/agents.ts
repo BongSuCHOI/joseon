@@ -1,7 +1,8 @@
 // src/agents/agents.ts — 에이전트 빌더 + 등록 로직
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { HarnessConfig, AgentOverrideConfig } from '../config/index.js';
+import type { HarnessConfig, AgentOverrideConfig, FallbackConfig } from '../config/index.js';
+import { logger } from '../shared/logger.js';
 
 export interface AgentDefinition {
     name: string;
@@ -10,10 +11,14 @@ export interface AgentDefinition {
         prompt: string;
         temperature?: number;
         model?: string;
+        variant?: string;
+        options?: Record<string, unknown>;
     };
     mode: 'primary' | 'subagent';
     hidden?: boolean;
     permission?: Record<string, string>;
+    _modelArray?: string[];
+    _fallbackChain?: string[];
 }
 
 function loadPrompt(filename: string): string {
@@ -21,16 +26,90 @@ function loadPrompt(filename: string): string {
     return readFileSync(promptPath, 'utf-8');
 }
 
-function applyOverrides(base: AgentDefinition, overrides?: AgentOverrideConfig): AgentDefinition {
-    if (!overrides) return base;
+function resolveModelValue(modelValue: string | { id: string; variant?: string }): string {
+    return typeof modelValue === 'string' ? modelValue : modelValue.id;
+}
+
+function applyOverrides(
+    base: AgentDefinition,
+    overrides?: AgentOverrideConfig,
+    fallback?: FallbackConfig,
+): AgentDefinition {
+    if (!overrides && !fallback) return base;
+
+    let modelArray: string[] | undefined;
+    let effectiveModel = base.config.model;
+    let effectiveVariant = base.config.variant;
+    let effectiveOptions = base.config.options;
+    let prompt = base.config.prompt;
+
+    if (overrides) {
+        if (overrides.model !== undefined) {
+            if (Array.isArray(overrides.model)) {
+                modelArray = overrides.model.map(resolveModelValue);
+                effectiveModel = modelArray[0];
+            } else {
+                effectiveModel = overrides.model;
+            }
+        }
+
+        if (overrides.variant !== undefined) {
+            effectiveVariant = overrides.variant;
+        }
+
+        if (overrides.prompt !== undefined) {
+            if (existsSync(overrides.prompt)) {
+                try {
+                    prompt = readFileSync(overrides.prompt, 'utf-8');
+                } catch (err) {
+                    logger.warn('agents', `Failed to load prompt file: ${overrides.prompt}`, {
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                }
+            } else {
+                logger.warn('agents', `Prompt file not found, using default: ${overrides.prompt}`);
+            }
+        }
+
+        if (overrides.append_prompt !== undefined) {
+            if (existsSync(overrides.append_prompt)) {
+                try {
+                    prompt = prompt + '\n\n' + readFileSync(overrides.append_prompt, 'utf-8');
+                } catch (err) {
+                    logger.warn('agents', `Failed to load append_prompt file: ${overrides.append_prompt}`, {
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                }
+            } else {
+                logger.warn('agents', `append_prompt file not found, skipping: ${overrides.append_prompt}`);
+            }
+        }
+
+        if (overrides.options !== undefined) {
+            effectiveOptions = { ...base.config.options, ...overrides.options };
+        }
+    }
+
+    let fallbackChain: string[] | undefined;
+    if (modelArray && modelArray.length > 1) {
+        fallbackChain = modelArray;
+    } else if (fallback?.chains?.[base.name]) {
+        fallbackChain = fallback.chains[base.name];
+    }
+
     return {
         ...base,
-        hidden: overrides.hidden ?? base.hidden,
+        ...(overrides?.hidden !== undefined && { hidden: overrides.hidden }),
         config: {
             ...base.config,
-            ...(overrides.model !== undefined && { model: overrides.model }),
-            ...(overrides.temperature !== undefined && { temperature: overrides.temperature }),
+            prompt,
+            ...(effectiveModel !== undefined && { model: effectiveModel }),
+            ...(effectiveVariant !== undefined && { variant: effectiveVariant }),
+            ...(overrides?.temperature !== undefined && { temperature: overrides.temperature }),
+            ...(effectiveOptions !== undefined && { options: effectiveOptions }),
         },
+        _modelArray: modelArray,
+        _fallbackChain: fallbackChain,
     };
 }
 
@@ -157,5 +236,5 @@ export function createAgents(config?: HarnessConfig): AgentDefinition[] {
         createCoderDef(),
         createAdvisorDef(),
     ];
-    return defs.map((d) => applyOverrides(d, config?.agents?.[d.name]));
+    return defs.map((d) => applyOverrides(d, config?.agents?.[d.name], config?.fallback));
 }
