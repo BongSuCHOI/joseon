@@ -132,11 +132,11 @@ function createCoderDef(): AgentDefinition {
     };
 }
 
-function createOracleDef(): AgentDefinition {
+function createAdvisorDef(): AgentDefinition {
     return {
-        name: 'oracle',
+        name: 'advisor',
         description: '수석 아키텍트 및 시스템 분석가 — 심층 분석, 아키텍처 자문, 복잡한 디버깅',
-        config: { prompt: loadPrompt('oracle.md'), temperature: 0.1 },
+        config: { prompt: loadPrompt('advisor.md'), temperature: 0.1 },
         mode: 'subagent',
         hidden: false,
         permission: { file_edit: 'deny' },
@@ -155,7 +155,7 @@ export function createAgents(config?: HarnessConfig): AgentDefinition[] {
         createExplorerDef(),
         createLibrarianDef(),
         createCoderDef(),
-        createOracleDef(),
+        createAdvisorDef(),
     ];
     return defs.map((d) => applyOverrides(d, config?.agents?.[d.name]));
 }

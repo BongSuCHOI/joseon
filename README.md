@@ -189,7 +189,7 @@ src/
         ├── backend.md
         ├── tester.md
         ├── reviewer.md
-        ├── oracle.md
+        ├── advisor.md
         ├── designer.md
         ├── explorer.md
         ├── librarian.md
