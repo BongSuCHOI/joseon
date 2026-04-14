@@ -430,3 +430,5 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-14 | Step 4D | npm run build | ✅ | orchestrator.ts + index.ts 통합 빌드 성공 |
 | 2026-04-14 | Step 4D | 기존 Step 1/3/4a/4c 회귀 | ✅ | 21+50+22+9+24=126 테스트 전원 통과 |
 | 2026-04-14 | Step 4D | 배포 동기화 | ✅ | .opencode/plugins/harness/에 orchestrator.ts 포함 동기화 |
+| 2026-04-14 | Step 4E | 통합 스모크 테스트 | ✅ | 121/121 통과 (Phase Manager + Error Recovery + QA Tracker + Agent Registration + Orchestrator Plugin) |
+| 2026-04-14 | Step 4E | 전체 회귀 (Step 1+3+4) | ✅ | 기존 테스트 전원 통과 |
