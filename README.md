@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | 🔧 진행 중 — 4a~4c 완료 |
+| 4 | 오케스트레이션 | + orchestrator | 🔧 진행 중 — 4a~4c 완료 + 프롬프트 개선 완료. 4D 대기 |
 
 ### 핵심 원칙
 
@@ -174,7 +174,7 @@ src/
 │       ├── backend.md
 │       ├── tester.md
 │       ├── reviewer.md
-│       └── cross-reviewer.md
+│       └── designer.md
 ```
 
 ## 참고
