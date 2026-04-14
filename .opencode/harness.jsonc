@@ -1,0 +1,63 @@
+{
+    // Harness Plugin Configuration
+    // Global config: ~/.config/opencode/harness.jsonc
+    // Project config: <project>/.opencode/harness.jsonc (overrides global)
+
+    "agents": {
+        "orchestrator": {
+            "model": "zai-coding-plan/glm-5-turbo",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "builder": {
+            "model": "zai-coding-plan/glm-5.1",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "frontend": {
+            "model": "zai-coding-plan/glm-4.7",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "backend": {
+            "model": "zai-coding-plan/glm-4.7",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "tester": {
+            "model": "zai-coding-plan/glm-4.7",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "reviewer": {
+            "model": "zai-coding-plan/glm-5.1",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "designer": {
+            "model": "zai-coding-plan/glm-5-turbo",
+            "temperature": 0.7,
+            "hidden": false,
+        },
+        "explorer": {
+            "model": "zai-coding-plan/glm-5-turbo",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+        "librarian": {
+            "model": "zai-coding-plan/glm-5-turbo",
+            "temperature": 0.1,
+            "hidden": false,
+        },
+    },
+
+    "harness": {
+        "soft_to_hard_threshold": 2,
+        "escalation_threshold": 3,
+        "max_recovery_stages": 5,
+        "history_max_bytes": 1048576,
+        "regex_max_length": 10000,
+        "scaffold_match_ratio": 0.6,
+        "search_max_results": 10,
+    },
+}

@@ -8,5 +8,8 @@ dist/
 # OpenCode 자동 생성 rules 마크다운
 .opencode/rules/
 
+# OpenCode 런타임 상태 파일
+.opencode/orchestrator-phase.json
+
 # Harness 런타임 데이터
 ~/.config/opencode/harness/
