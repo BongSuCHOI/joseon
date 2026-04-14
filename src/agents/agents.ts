@@ -98,21 +98,16 @@ export function createReviewerAgent(): AgentDefinition {
     };
 }
 
-export function createCrossReviewerAgent(): AgentDefinition {
+export function createDesignerAgent(): AgentDefinition {
     return {
-        name: 'cross-reviewer',
-        description: '다른 모델 코드 리뷰 서브에이전트 (최소 권한)',
+        name: 'designer',
+        description: 'UI/UX design, review, and implementation specialist',
         config: {
-            prompt: loadPrompt('cross-reviewer.md'),
-            temperature: 0.1,
+            prompt: loadPrompt('designer.md'),
+            temperature: 0.7,
         },
         mode: 'subagent',
         hidden: false,
-        permission: {
-            file_edit: 'deny',
-            bash: 'deny',
-            task: 'deny',
-        },
     };
 }
 
@@ -124,6 +119,6 @@ export function createAgents(): AgentDefinition[] {
         createBackendAgent(),
         createTesterAgent(),
         createReviewerAgent(),
-        createCrossReviewerAgent(),
+        createDesignerAgent(),
     ];
 }
