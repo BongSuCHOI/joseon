@@ -60,13 +60,13 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
 
     return {
         // L1: 도구 실행 후 기록 (순수 로깅만 담당)
-        'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output: { title: string; output: string }) => {
+        'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output?: { title?: string; output?: string }) => {
             const date = new Date().toISOString().slice(0, 10);
             logger.info('observer', 'tool executed', {
                 tool: input.tool,
                 args: input.args,
-                title: output.title,
-                output_preview: typeof output.output === 'string' ? output.output.slice(0, 500) : undefined,
+                title: output?.title,
+                output_preview: typeof output?.output === 'string' ? output.output.slice(0, 500) : undefined,
             });
         },
 

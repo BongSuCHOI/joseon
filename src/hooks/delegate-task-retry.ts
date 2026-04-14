@@ -34,7 +34,9 @@ export function createDelegateTaskRetryHook() {
     let pendingGuidance: string | null = null;
 
     return {
-        'tool.execute.after': async (input: { tool: string }, output: { output: unknown }) => {
+        'tool.execute.after': async (input: { tool: string }, output?: { output?: unknown }) => {
+            if (!output?.output) return;
+
             const outputStr = typeof output.output === 'string' ? output.output : JSON.stringify(output.output);
             if (!outputStr) return;
 

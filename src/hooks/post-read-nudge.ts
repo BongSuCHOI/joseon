@@ -4,10 +4,10 @@ const READ_NUDGE = '\n[HARNESS] Consider delegating implementation to a speciali
 
 export function createPostReadNudgeHook() {
     return {
-        'tool.execute.after': async (input: { tool: string; sessionID?: string }, output: { output: unknown }) => {
+        'tool.execute.after': async (input: { tool: string; sessionID?: string }, output?: { output: unknown }) => {
             if (input.tool !== 'read') return;
 
-            if (typeof output.output === 'string') {
+            if (typeof output?.output === 'string') {
                 output.output += READ_NUDGE;
                 logger.debug('post-read-nudge', 'read nudge appended');
             }

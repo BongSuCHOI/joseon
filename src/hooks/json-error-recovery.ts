@@ -28,8 +28,9 @@ export function createJsonErrorRecoveryHook() {
     let pendingReminder: string | null = null;
 
     return {
-        'tool.execute.after': async (input: { tool: string }, output: { output: unknown }) => {
+        'tool.execute.after': async (input: { tool: string }, output?: { output?: unknown }) => {
             if (JSON_ERROR_TOOL_EXCLUDE_LIST.has(input.tool)) return;
+            if (!output?.output) return;
 
             const outputStr = typeof output.output === 'string' ? output.output : JSON.stringify(output.output);
             if (!outputStr) return;
