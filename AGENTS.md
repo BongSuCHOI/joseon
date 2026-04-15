@@ -118,7 +118,7 @@ Orchestrator (최상위, 기본 에이전트)
 | fix: 커밋 패턴 추출 고도화 | 실동작에서 source_file 빈 문자열 이슈. git log 파싱 보강 + 파일 경로 정확도 개선 |
 | Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |
 | Cross-Project 자동 승격 | 2개 이상 프로젝트 운영 시. `global` 키워드 인프라는 이미 구축됨 (~80줄). 승격 기준 설계가 핵심 |
-| ~~에이전트별 도구 deny 리스트~~ | → 🟡 배포 준비 단계로 이동 (B3 다음 우선순위) |
+| ~~에이전트별 도구 deny 리스트~~ | ✅ 완료 — `buildToolPermissions()` + config 콜백 병합. → 2026-04-16 배포 준비 단계에서 완료 |
 | 스킬 allowedAgents 시스템 | **사용 안 함 예정.** 이미 harness.jsonc의 `agents.{name}.skills` 배열로 에이전트별 스킬 접근 제어 가능. 제어 방향만 다를 뿐(에이전트→스킬 vs 스킬→에이전트) 결과는 동일하므로 중복 기능. omOs에서 의미 있었던 건 스킬과 에이전트가 같은 패키지였기 때문 |
 | agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
 | Council 시스템 (council + councillor + council-master) | 다중 모델 환경(최소 2개 이상 서로 다른 모델) 구축 후. 단일 모델에서는 의미 없음. 중대한 아키텍처/보안 결정에만 사용. 질문당 3~5배 비용 |
@@ -144,7 +144,7 @@ Orchestrator (최상위, 기본 에이전트)
 | **에이전트 설정 확장 (B1+B2)** | ✅ 완료 | AgentOverrideConfig 확장: variant, skills, mcps, options, prompt, append_prompt, model 배열, FallbackChain, parseList() | `config/agent-config-handler.ts` |
 | **서브에이전트 깊이 추적 (B3)** | ✅ 완료 | SubagentDepthTracker: max depth 초과 시 차단. observer에서 registerChild/cleanup 통합 | `background/subagent-depth.ts` |
 
-#### 🟡 배포 준비 단계
+#### 🟡 배포 준비 단계 — 전체 완료 ✅
 
 | 항목 | 내용 | omOs 참조 | 상태 |
 |------|------|-----------|------|
