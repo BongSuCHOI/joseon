@@ -463,3 +463,10 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-15 | B3 | smoke test — SubagentDepthTracker (8/8) | ✅ | 등록/깊이조회/cleanup/cleanupAll/max초과차단/커스텀maxDepth |
 | 2026-04-15 | B3 | 전체 스모크 테스트 (248/248) | ✅ | smoke 29 + step3 50 + step4 169 |
 | 2026-04-15 | B3 | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-16 | Deploy Prep | deny_tools 스키마 + buildToolPermissions | ✅ | AgentOverrideConfig에 deny_tools 필드, buildToolPermissions() + config 콜백 병합 |
+| 2026-04-16 | Deploy Prep | harness.jsonc deny_tools 예시 | ✅ | reviewer, advisor, explorer, librarian에 write/edit/patch/bash, designer에 bash |
+| 2026-04-16 | Deploy Prep | README.md 모델/MCP/빠른시작 | ✅ | 권장 모델 매핑 테이블, 권장 MCP 서버, 빠른 시작 가이드 추가 |
+| 2026-04-16 | Deploy Prep | AGENTS.md 배포 준비 상태 | ✅ | deny_tools ✅ 완료, 모델/MCP 📝 문서로 해결 |
+| 2026-04-16 | Deploy Prep | smoke test — buildToolPermissions | ✅ | 빈 배열, undefined, 특정 도구, 여러 도구 테스트 |
+| 2026-04-16 | Deploy Prep | smoke test — deny_tools 통합 | ✅ | config 콜백에서 deny_tools가 permission에 병합되는지 확인 |
+| 2026-04-16 | Deploy Prep | npm run build | ✅ | 타입 에러 없음 |

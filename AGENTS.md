@@ -118,12 +118,12 @@ Orchestrator (최상위, 기본 에이전트)
 | fix: 커밋 패턴 추출 고도화 | 실동작에서 source_file 빈 문자열 이슈. git log 파싱 보강 + 파일 경로 정확도 개선 |
 | Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |
 | Cross-Project 자동 승격 | 2개 이상 프로젝트 운영 시. `global` 키워드 인프라는 이미 구축됨 (~80줄). 승격 기준 설계가 핵심 |
-| 에이전트별 도구 deny 리스트 | Step 4 완료 후 고도화 1차. agents.ts의 permission 필드를 `{ deny: ['file_edit', 'file_write', 'bash'] }` 형태로 확장. enforcer의 tool.execute.before에서 차단. 프롬프트(soft) + 기술적 제약(hard) 이중 통제 |
-| 스킬 allowedAgents 시스템 | 에이전트별 도구 deny 구현 후. 스킬 설치 시 접근 가능 에이전트 지정. omOs의 `allowedAgents` 패턴 |
+| ~~에이전트별 도구 deny 리스트~~ | → 🟡 배포 준비 단계로 이동 (B3 다음 우선순위) |
+| 스킬 allowedAgents 시스템 | **사용 안 함 예정.** 이미 harness.jsonc의 `agents.{name}.skills` 배열로 에이전트별 스킬 접근 제어 가능. 제어 방향만 다를 뿐(에이전트→스킬 vs 스킬→에이전트) 결과는 동일하므로 중복 기능. omOs에서 의미 있었던 건 스킬과 에이전트가 같은 패키지였기 때문 |
 | agent-browser 스킬 도입 | 스킬 allowedAgents 구현 후. tester(스크린샷 QA) + designer(시각적 검증)에 할당 |
 | Council 시스템 (council + councillor + council-master) | 다중 모델 환경(최소 2개 이상 서로 다른 모델) 구축 후. 단일 모델에서는 의미 없음. 중대한 아키텍처/보안 결정에만 사용. 질문당 3~5배 비용 |
 | Hooks — foreground-fallback (모델 자동 전환) | 다중 모델 환경 전제. Rate limit 감지 → 다음 미사용 모델로 자동 전환. omOs의 `ForegroundFallbackManager` 참조. 단일 모델에서는 동작 불가 |
-| Hooks — filter-available-skills (에이전트별 스킬 권한) | 스킬 allowedAgents 시스템 구현 후. omOs의 `createFilterAvailableSkillsHook` 참조. 에이전트별 permission.skill 규칙에 따라 available_skills 블록 필터링 |
+| Hooks — filter-available-skills (에이전트별 스킬 권한) | 에이전트별 `skills` 설정과 병행. 에이전트에게 노출되는 available_skills 블록을 필터링하여 불필요한 스킬 호출 방지. omOs의 `createFilterAvailableSkillsHook` 참조 |
 | Hooks — todo-continuation (TODO 자동 진행) | autopilot과 세트. maxContinuations/cooldownMs 설정 필요. omOs의 `createTodoContinuationHook` 참조. 고도화 단계에서 검토 |
 | Hooks — autopilot (자율 모드) | todo-continuation과 세트. 사용자 확인 없이 자동으로 다음 작업 수행. omOs의 `createAutopilotHook` 참조. 고도화 단계에서 검토 |
 | Hooks — auto-update-checker (플러그인 자동 업데이트) | npm 배포 후 필요. 세션 생성 시 npm registry 확인. omOs의 `createAutoUpdateCheckerHook` 참조 |
@@ -139,17 +139,18 @@ Orchestrator (최상위, 기본 에이전트)
 | 항목 | 상태 | 구현 내용 | omOs 참조 |
 |------|------|-----------|-----------|
 | **config 시스템** (`src/config/`) | ✅ 완료 | 수동 검증 + JSONC 로더 + 글로벌/프로젝트 병합. 에이전트별 model/temperature/hidden 오버라이드 가능 | `config/schema.ts`, `config/loader.ts` |
-| **hooks 보강** (`src/hooks/`) | ✅ 완료 | delegate-task-retry, json-error-recovery, delegation-nudge, phase-reminder (5개) | `hooks/` 15개 |
+| **hooks 보강** (`src/hooks/`) | ✅ 완료 | delegate-task-retry, json-error-recovery, post-file-tool-nudge, post-read-nudge, phase-reminder (5개) | `hooks/` 15개 |
 | **구조화된 로깅** (`src/shared/logger.ts`) | ✅ 완료 | 4레벨(debug/info/warn/error) + HARNESS_LOG_LEVEL env + 통합 harness.jsonl + stderr 포맷 | `utils/logger.ts` |
+| **에이전트 설정 확장 (B1+B2)** | ✅ 완료 | AgentOverrideConfig 확장: variant, skills, mcps, options, prompt, append_prompt, model 배열, FallbackChain, parseList() | `config/agent-config-handler.ts` |
+| **서브에이전트 깊이 추적 (B3)** | ✅ 완료 | SubagentDepthTracker: max depth 초과 시 차단. observer에서 registerChild/cleanup 통합 | `background/subagent-depth.ts` |
 
 #### 🟡 배포 준비 단계
 
 | 항목 | 내용 | omOs 참조 | 상태 |
 |------|------|-----------|------|
-| **에이전트 설정 확장 (B1+B2)** | AgentOverrideConfig 확장: variant, skills, mcps, options, prompt, append_prompt, model 배열, FallbackChain, parseList() | `config/agent-config-handler.ts` | ✅ 완료 |
-| **서브에이전트 깊이 추적 (B3)** | SubagentDepthTracker: max depth 초과 시 차단 | `background/subagent-depth.ts` | ✅ 완료 |
-| **모델 자동 감지/라우팅** | 사용자 환경의 가용 모델 감지 + 에이전트별 자동 할당 | `cli/model-selection.ts`, `cli/dynamic-model-selection.ts` | 미시작 |
-| **MCP 설정 가이드** | 필요한 MCP 서버(context7, grep_app 등)를 설정에 선언적으로 정의. 플러그인이 MCP를 등록할 수 없으므로 문서 또는 postinstall 안내 | `mcp/`, `config/agent-mcps.ts` | 미시작 |
+| **에이전트별 도구 deny 리스트** | harness.jsonc의 agents.{name}에 `deny_tools` 선언적 정의. OpenCode permission 시스템으로 도구 차단. 프롬프트(soft) + 기술적 제약(hard) 이중 통제 | `config/agent-config-handler.ts` | ✅ 완료 — `buildToolPermissions()` + config 콜백 병합 |
+| **모델 자동 감지/라우팅** | 사용자 환경의 가용 모델 감지 + 에이전트별 자동 할당 | `cli/model-selection.ts`, `cli/dynamic-model-selection.ts` | 📝 문서로 해결 — README.md 권장 모델 매핑 테이블 제공 |
+| **MCP 설정 가이드** | 필요한 MCP 서버(context7, grep_app 등)를 설정에 선언적으로 정의. 플러그인이 MCP를 등록할 수 없으므로 문서 또는 postinstall 안내 | `mcp/`, `config/agent-mcps.ts` | 📝 문서로 해결 — README.md 권장 MCP 서버 섹션 제공 |
 
 ### 사용 안 함 (의식적 제외)
 
