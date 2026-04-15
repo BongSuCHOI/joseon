@@ -109,7 +109,7 @@ function mapSignalTypeToScope(signalType: Signal['type']): Rule['pattern']['scop
     switch (signalType) {
         case 'error_repeat': return 'tool';
         case 'user_feedback': return 'prompt';
-        case 'fix_commit': return 'file';
+        case 'fix_commit': return 'tool';
         case 'violation': return 'tool';
         default: return 'tool';
     }
@@ -357,16 +357,20 @@ function detectFixCommits(worktree: string, projectKey: string): void {
 
         // 3번째 줄부터 파일 목록
         const files = lines.slice(2).filter((l) => l.trim().length > 0);
-        const firstFile = files[0] || '';
 
         // fix_commit signal 생성
+        // NOTE: source_file(파일 경로)을 pattern으로 사용하지 않음.
+        // "A 파일에서 버그를 고쳤다" ≠ "A 파일을 수정하지 마라" (논리적 오류).
+        // 파일 경로가 패턴이 되면 설정 파일(harness.jsonc 등)의 정당한 수정이 차단됨.
+        // diff 기반 실수 패턴 학습은 고도화 단계에서 LLM 기반으로 구현 예정.
         const signal: Record<string, unknown> = {
             type: 'fix_commit',
             project_key: projectKey,
             payload: {
                 description: `fix 커밋 감지: ${message.trim()}`,
-                pattern: firstFile || message.trim(),
-                source_file: firstFile,
+                pattern: message.trim(),
+                source_file: '',
+                affected_files: files,
                 recurrence_count: 1,
                 related_signals: [hash],
             },
