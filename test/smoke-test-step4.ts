@@ -37,6 +37,7 @@ mkdirSync(docsDir, { recursive: true });
 const testProjectKey = `test-step4-${Date.now()}`;
 const testProjectDir = join(HARNESS_DIR, 'projects', testProjectKey);
 
+async function main(): Promise<void> {
 try {
     mkdirSync(testProjectDir, { recursive: true });
 
@@ -346,6 +347,29 @@ try {
     // ============================================================
     console.log('\n--- 5. Orchestrator Plugin Integration ---\n');
 
+    // 5-0. deny_tools 통합 테스트 — config 콜백에서 deny_tools가 permission에 병합되는지
+    console.log('[5-0] deny_tools → permission 병합 테스트');
+    // harness.jsonc에 deny_tools가 설정된 상태에서 플러그인을 로드
+    const denyServerResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
+    const denyConfig: Record<string, unknown> = {};
+    await (denyServerResult.config as Function)(denyConfig);
+    const denyAgentMap = denyConfig.agent as Record<string, any>;
+    // reviewer: deny_tools: ["write", "edit", "patch", "bash"] + file_edit: "deny"
+    assert(denyAgentMap.reviewer?.permission?.write === 'deny', 'deny_tools: reviewer write === deny');
+    assert(denyAgentMap.reviewer?.permission?.edit === 'deny', 'deny_tools: reviewer edit === deny');
+    assert(denyAgentMap.reviewer?.permission?.patch === 'deny', 'deny_tools: reviewer patch === deny');
+    assert(denyAgentMap.reviewer?.permission?.bash === 'deny', 'deny_tools: reviewer bash === deny');
+    assert(denyAgentMap.reviewer?.permission?.file_edit === 'deny', 'deny_tools: reviewer 기존 file_edit deny 보존');
+    // advisor: deny_tools: ["write", "edit", "patch", "bash"] + file_edit: "deny"
+    assert(denyAgentMap.advisor?.permission?.write === 'deny', 'deny_tools: advisor write === deny');
+    assert(denyAgentMap.advisor?.permission?.file_edit === 'deny', 'deny_tools: advisor 기존 file_edit deny 보존');
+    // designer: deny_tools: ["bash"] (file_edit 없음)
+    assert(denyAgentMap.designer?.permission?.bash === 'deny', 'deny_tools: designer bash === deny');
+    assert(denyAgentMap.designer?.permission?.write === undefined, 'deny_tools: designer write 제한 없음');
+    // builder: deny_tools 없음 → 아무 tool permission 없어야 함
+    assert(denyAgentMap.builder?.permission?.write === undefined, 'deny_tools: builder write 제한 없음');
+    assert(denyAgentMap.builder?.permission?.bash === undefined, 'deny_tools: builder bash 제한 없음');
+
     // 5-1. 플러그인 id 검증
     console.log('[5-1] 플러그인 id');
     assert(typeof plugin.id === 'string' && plugin.id.length > 0, `id가 비어있지 않은 문자열: "${plugin.id}"`);
@@ -434,3 +458,6 @@ try {
 }
 
 process.exit(failed > 0 ? 1 : 0);
+}
+
+main().catch((err) => { console.error(err); process.exit(1); });

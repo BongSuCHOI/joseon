@@ -169,6 +169,36 @@ assert(parseList(['nonexistent'], allItems).length === 0, 'parseList: 존재하�
 assert(parseList(['websearch', '!websearch'], allItems).length === 0, 'parseList: allow + deny 동일 → 빈 결과');
 assert(JSON.stringify(parseList(['*'], [])) === JSON.stringify([]), 'parseList: * with empty available → 빈 결과');
 
+// === buildToolPermissions 로직 테스트 ===
+console.log('\n=== buildToolPermissions 로직 테스트 ===');
+
+// buildToolPermissions와 동일한 로직 (src/index.ts에 정의, export되지 않으므로 여기서 재구현)
+function buildToolPermissions(denyTools: string[] | undefined): Record<string, string> {
+    const permissions: Record<string, string> = {};
+    if (!denyTools || denyTools.length === 0) return permissions;
+    for (const tool of denyTools) {
+        permissions[tool] = 'deny';
+    }
+    return permissions;
+}
+
+const tp1 = buildToolPermissions(undefined);
+assert(Object.keys(tp1).length === 0, 'buildToolPermissions: undefined → 빈 객체');
+
+const tp2 = buildToolPermissions([]);
+assert(Object.keys(tp2).length === 0, 'buildToolPermissions: 빈 배열 → 빈 객체');
+
+const tp3 = buildToolPermissions(['bash']);
+assert(tp3['bash'] === 'deny', 'buildToolPermissions: 단일 도구 → { bash: "deny" }');
+assert(Object.keys(tp3).length === 1, 'buildToolPermissions: 단일 도구 → 길이 1');
+
+const tp4 = buildToolPermissions(['write', 'edit', 'patch', 'bash']);
+assert(tp4['write'] === 'deny', 'buildToolPermissions: write deny');
+assert(tp4['edit'] === 'deny', 'buildToolPermissions: edit deny');
+assert(tp4['patch'] === 'deny', 'buildToolPermissions: patch deny');
+assert(tp4['bash'] === 'deny', 'buildToolPermissions: bash deny');
+assert(Object.keys(tp4).length === 4, 'buildToolPermissions: 4개 도구 → 길이 4');
+
 // === 정리 ===
 console.log('\n=== 테스트 결과 ===');
 console.log(`통과: ${passed}, 실패: ${failed}`);
