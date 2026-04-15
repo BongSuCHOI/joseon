@@ -196,6 +196,126 @@ src/
         └── coder.md
 ```
 
+## 권장 모델 매핑
+
+에이전트별 권장 모델 설정입니다. `.opencode/harness.jsonc`에서 오버라이드할 수 있습니다.
+
+| 에이전트 | 권장 모델 | 설명 |
+|----------|-----------|------|
+| orchestrator | glm-5-turbo (빠른 추론) | 판단/라우팅에 최적화. 응답 속도 중요 |
+| builder | glm-5.1 (고품질) | Phase 관리 + 서브에이전트 분배. 정확성 중요 |
+| frontend | glm-4.7 | 프론트엔드 구현 |
+| backend | glm-4.7 | 백엔드 구현 |
+| tester | glm-4.7 | QA 테스트 |
+| coder | glm-4.7 | 기계적 실행 (빠른 타이핑) |
+| reviewer | glm-5.1 (고품질) | 코드 리뷰. 정확한 분석 필요 |
+| advisor | glm-5.1 (고품질) | 아키텍처 자문. 심층 분석 필요 |
+| designer | glm-4.7 (temperature 0.7) | UI/UX 기획. 창의성 필요 |
+| explorer | glm-4.7 | 코드베이스 검색 |
+| librarian | glm-4.7 | 외부 문서 조사 |
+
+> **참고:** 모델은 `.opencode/harness.jsonc`에서 자유롭게 변경 가능. FallbackChain(`"model": ["a", "b"]`)으로 rate limit 시 자동 전환도 지원.
+
+## 권장 MCP 서버
+
+### 필수 (librarian 전용)
+
+| MCP 서버 | 용도 | 설치 |
+|----------|------|------|
+| **context7** | 라이브러리 문서 조회 | `opencode.json`의 `mcp.server`에 추가 |
+| **grep_app** | 코드 검색 (ripgrep 클라우드) | `opencode.json`의 `mcp.server`에 추가 |
+| **web-search-prime** | 웹 검색 | `opencode.json`의 `mcp.server`에 추가 |
+| **web-reader** | URL→텍스트 변환 | `opencode.json`의 `mcp.server`에 추가 |
+| **zread** | GitHub 리포지토리 문서/코드 검색 | `opencode.json`의 `mcp.server`에 추가 |
+
+### 권장 (전체 에이전트용)
+
+| MCP 서버 | 용도 |
+|----------|------|
+| **zai-mcp-server** | 스크린샷 분석, UI→코드 변환, 에러 진단 |
+
+`opencode.json` 예시:
+
+```json
+{
+  "mcp": {
+    "server": {
+      "context7": { "command": "npx", "args": ["-y", "@upstreamapi/context7"] },
+      "grep_app": { "command": "npx", "args": ["-y", "@anthropic/grep-app-mcp"] }
+    }
+  }
+}
+```
+
+> 플러그인은 MCP 서버를 직접 등록할 수 없으므로, `opencode.json`에 수동으로 추가해야 합니다. harness.jsonc의 `mcps` 필드로 각 에이전트의 접근 권한을 제어합니다.
+
+## 빠른 시작
+
+### 1. 설치
+
+```bash
+git clone <repo-url>
+cd harness-orchestration
+npm install
+npm run build
+```
+
+### 2. OpenCode에 플러그인 등록
+
+`opencode.json` (또는 `.opencode/opencode.json`):
+
+```json
+{
+  "plugin": ["./.opencode/plugins/harness"]
+}
+```
+
+### 3. 설정 파일 작성
+`.opencode/harness.jsonc`:
+
+```jsonc
+{
+    "agents": {
+        "orchestrator": {
+            "model": "zai-coding-plan/glm-5-turbo",
+            "skills": ["*"],
+            "mcps": ["*"]
+        },
+        "builder": {
+            "model": "zai-coding-plan/glm-5.1",
+            "skills": ["writing-plans", "subagent-driven-development"]
+        },
+        "reviewer": {
+            "model": "zai-coding-plan/glm-5.1",
+            "deny_tools": ["write", "edit", "patch", "bash"]
+        },
+        "advisor": {
+            "model": "zai-coding-plan/glm-5.1",
+            "deny_tools": ["write", "edit", "patch", "bash"]
+        }
+    },
+    "harness": {
+        "soft_to_hard_threshold": 2,
+        "escalation_threshold": 3
+    }
+}
+```
+
+### 4. 로컬 플러그인 동기화
+
+```bash
+npm run deploy
+# 또는 수동: rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
+```
+
+### 5. OpenCode 실행
+
+```bash
+opencode
+# orchestrator 에이전트가 기본으로 활성화됩니다.
+# 대규모 작업은 @builder에게 자동 위임됩니다.
+```
+
 ## 참고
 
 - [OpenCode Plugins](https://opencode.ai/docs/plugins/) — 플러그인 구조, 훅 목록
