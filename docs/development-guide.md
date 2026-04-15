@@ -470,3 +470,6 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-16 | Deploy Prep | smoke test — buildToolPermissions | ✅ | 빈 배열, undefined, 특정 도구, 여러 도구 테스트 |
 | 2026-04-16 | Deploy Prep | smoke test — deny_tools 통합 | ✅ | config 콜백에서 deny_tools가 permission에 병합되는지 확인 |
 | 2026-04-16 | Deploy Prep | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-16 | fix_commit 패턴 추출 수정 | detectFixCommits에서 source_file을 패턴으로 사용 금지 | ✅ | "수정한 파일 = 수정 금지 파일" 논리적 오류 수정. pattern을 커밋 메시지로 변경, source_file을 빈 문자열로 설정 |
+| 2026-04-16 | fix_commit scope 수정 | mapSignalTypeToScope('fix_commit')을 'file' → 'tool'로 변경 | ✅ | 파일 경로 패턴 매칭으로 인한 설정 파일 차단 방지 |
+| 2026-04-16 | fix_commit 테스트 | smoke-test.ts에 5개 신규 테스트 | ✅ | 43/43 통과 (기존 38 + source_file 금지 5) |
