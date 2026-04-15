@@ -13,6 +13,7 @@ export interface AgentOverrideConfig {
     options?: Record<string, unknown>;
     prompt?: string;
     append_prompt?: string;
+    deny_tools?: string[];
 }
 
 export interface FallbackConfig {

@@ -11,6 +11,15 @@ import type { AgentDefinition } from './agents/agents.js';
 import { loadConfig } from './config/index.js';
 import { createAllHooks } from './hooks/index.js';
 
+function buildToolPermissions(denyTools: string[] | undefined): Record<string, string> {
+    const permissions: Record<string, string> = {};
+    if (!denyTools || denyTools.length === 0) return permissions;
+    for (const tool of denyTools) {
+        permissions[tool] = 'deny';
+    }
+    return permissions;
+}
+
 function buildMcpPermissions(allowedMcps: string[] | undefined, allMcpNames: string[]): Record<string, string> {
     const permissions: Record<string, string> = {};
     if (allMcpNames.length === 0) return permissions;
@@ -89,7 +98,19 @@ export default {
             }
           }
 
-          agentMap[agent.name] = { ...agent, permission: mergedPermission };
+          const toolPerms = buildToolPermissions(overrides?.deny_tools);
+          for (const [key, value] of Object.entries(toolPerms)) {
+            if (mergedPermission[key] === undefined) {
+              mergedPermission[key] = value;
+            }
+          }
+
+          const { config: agentConfig, _modelArray, _fallbackChain, ...rest } = agent;
+          agentMap[agent.name] = {
+            ...rest,
+            ...agentConfig,
+            permission: mergedPermission,
+          };
         }
       }
 
