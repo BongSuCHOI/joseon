@@ -71,7 +71,7 @@
 - **THEN** `agents?: Record<string, AgentOverrideConfig>`, `harness?: HarnessSettings`, `fallback?: FallbackConfig` 필드가 정의되어 있음
 
 ### Requirement: AgentOverrideConfig allows per-agent overrides
-`AgentOverrideConfig`은 `model`, `temperature`, `hidden`, `variant`, `skills`, `mcps`, `options`, `prompt`, `append_prompt` 필드를 가진다. 모두 optional.
+`AgentOverrideConfig`은 `model`, `temperature`, `hidden`, `variant`, `skills`, `mcps`, `options`, `prompt`, `append_prompt`, `deny_tools` 필드를 가진다. 모두 optional.
 
 #### Scenario: Override agent variant
 - **WHEN** config 파일에 `{"agents": {"designer": {"variant": "high"}}}`가 설정됨
@@ -96,6 +96,10 @@
 #### Scenario: Override agent with append prompt
 - **WHEN** config 파일에 `{"agents": {"librarian": {"append_prompt": "/path/to/extra.md"}}}`가 설정됨
 - **THEN** librarian 에이전트의 기본 프롬프트 끝에 해당 파일 내용이 추가됨
+
+#### Scenario: Override agent with deny_tools
+- **WHEN** config 파일에 `{"agents": {"reviewer": {"deny_tools": ["write", "edit", "bash"]}}}`가 설정됨
+- **THEN** reviewer 에이전트가 write, edit, bash 도구를 사용할 수 없도록 제한됨
 
 #### Scenario: All defaults match current behavior
 - **WHEN** config 파일이 존재하지 않거나 agents 섹션이 비어있음

@@ -80,7 +80,7 @@ The plugin SHALL set `opencodeConfig.default_agent` to "orchestrator" when the u
 - **THEN** `createLibrarianAgent()`가 기존 하드코딩값을 사용함 (회귀 없음)
 
 ### Requirement: Agent auto-registration via config callback
-플러그인 진입점 `src/index.ts`의 `config` 콜백은 에이전트를 등록할 뿐만 아니라, 에이전트별 MCP/Skills permission을 자동으로 생성한다.
+플러그인 진입점 `src/index.ts`의 `config` 콜백은 에이전트를 등록할 뿐만 아니라, 에이전트별 MCP/Skills/Tool deny permission을 자동으로 생성한다.
 
 #### Scenario: MCP permissions generated during registration
 - **WHEN** config 콜백이 실행되고 librarian 에이전트에 `mcps: ["websearch"]`가 설정되어 있음
