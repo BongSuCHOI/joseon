@@ -114,25 +114,24 @@ Orchestrator (최상위, 기본 에이전트)
 
 ### Step 4 이후 고도화 (시기 미정)
 
-| 항목 | 선행 조건 |
-|------|----------|
-| 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | 데이터 충분히 축적 후 |
-| 규칙 자동 삭제 (Pruning) | 규칙 수십 개 이상 쌓일 때 |
-| ~~Compacting 상한선 핫픽스~~ | ✅ 완료 — Step 4f 안정화 후속. HARD 전부 + SOFT 위반빈도 상위 N개로 제한. |
-| Compacting 의미 기반 규칙 필터링 | 규칙 수십 개 시. 세션 파일/키워드 기반 관련성 필터링. false negative 주의 |
-| 외부 트렌드 자동 수집 | 하네스 완전 안정화 후, 가장 마지막 |
-| LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | deterministic 매핑으로 실제 데이터 축적 후, 틀린 규칙 패턴 파악 후 |
-| ~~fix: 커밋 패턴 추출 고도화~~ | ✅ 완료 — Step 4f 안정화 후속. source_file 빈 문자열 이슈를 막고 commit message 기반 추출로 정규화. |
+- 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
+
+| 항목 | 상태 / 전략 | 요약 |
+|------|-------------|------|
+| 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | 계획 — shadow | Sync/Index/Search 위에 데이터가 쌓이면 상위 4단계를 순차 승격. |
+| 규칙 자동 삭제 (Pruning) | 계획 — guarded | 측정은 유지하고, 삭제는 충분한 데이터와 낮은 오탐 위험이 확인될 때만. |
+| Compacting 의미 기반 규칙 필터링 | 계획 — default-off shadow | 기존 compacting은 유지, 관련성 필터는 토큰 압박과 노이즈가 확인되면 도입. |
+| LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | 계획 — shadow | deterministic 기준을 그대로 두고, LLM은 비교용 판정자로 먼저 붙인다. |
+| fix: diff 기반 실수 패턴 학습 | 계획 — guarded-shadow | fix_commit 경로는 유지하고, diff 의미 요약만 별도로 축적한 뒤 승격. |
+| Ack 조건 강화 | 계획 — guarded | file-write ack를 유지하면서 harness-eval/acceptance 조건을 단계적으로 추가. |
+| Cross-Project 자동 승격 | 계획 — guarded-off | 다중 프로젝트 근거가 쌓이기 전까지는 수동 `global` 우선. |
+| Hooks — auto-update-checker | 계획 — default-off | npm 배포 이후에만 세션 시작 시 버전 확인, 기본은 비활성. |
+<!--
 | fix: diff 기반 실수 패턴 학습 | LLM 기반 signal 판정(#B)과 함께. fix 커밋의 diff에서 "왜 고쳤는가"를 추출하여 의미 있는 규칙 패턴 생성. 현재는 source_file(파일 경로)을 패턴으로 사용하는데, 이는 논리적 오류(수정한 파일 = 수정 금지 파일). diff 분석은 단순 패턴 매칭으로 한계가 있으므로 LLM 필요 |
 | Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |
 | Cross-Project 자동 승격 | 2개 이상 프로젝트 운영 시. `global` 키워드 인프라는 이미 구축됨 (~80줄). 승격 기준 설계가 핵심 |
-| ~~에이전트별 도구 deny 리스트~~ | ✅ 완료 — `buildToolPermissions()` + config 콜백 병합. → 2026-04-16 배포 준비 단계에서 완료 |
-| 스킬 allowedAgents 시스템 | **사용 안 함 예정.** 이미 harness.jsonc의 `agents.{name}.skills` 배열로 에이전트별 스킬 접근 제어 가능. 제어 방향만 다를 뿐(에이전트→스킬 vs 스킬→에이전트) 결과는 동일하므로 중복 기능. omOs에서 의미 있었던 건 스킬과 에이전트가 같은 패키지였기 때문 |
-| Hooks — todo-continuation (TODO 자동 진행) | autopilot과 세트. maxContinuations/cooldownMs 설정 필요. omOs의 `createTodoContinuationHook` 참조. 고도화 단계에서 검토 |
-| Hooks — autopilot (자율 모드) | todo-continuation과 세트. 사용자 확인 없이 자동으로 다음 작업 수행. omOs의 `createAutopilotHook` 참조. 고도화 단계에서 검토 |
-| Hooks — auto-update-checker (플러그인 자동 업데이트) | npm 배포 후 필요. 세션 생성 시 npm registry 확인. omOs의 `createAutoUpdateCheckerHook` 참조 |
-| Hooks — apply-patch (패치 적용 도구) | **사용 안 함.** OpenCode 자체 patch 도구로 충분. omOs는 12개 파일로 구현되어 있으나 우리는 불필요 |
-| Hooks — chat-headers (커스텀 HTTP 헤더) | **사용 안 함.** Rate limit/재시도 가능 실패 처리는 foreground-fallback 훅의 same-session reactive fallback으로 처리 |
+
+-->
 
 ### npm 배포 전 필수 인프라 (omOs 대비 분석)
 
