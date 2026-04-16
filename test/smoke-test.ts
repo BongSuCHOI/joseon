@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 
 // shared 모듈 직접 import 테스트
 import { getProjectKey, ensureHarnessDirs, logEvent, generateId, HARNESS_DIR, parseList } from '../src/shared/index.js';
+import { buildBoundedCompactionContext, buildFixCommitSignalPayload, escapeRegexLiteral } from '../src/harness/improver.js';
 import type { Rule, Signal } from '../src/types.js';
 
 let passed = 0;
@@ -202,25 +203,28 @@ assert(Object.keys(tp4).length === 4, 'buildToolPermissions: 4개 도구 → 길
 // === fix_commit 패턴 추출 테스트 (C: source_file 패턴 금지) ===
 console.log('\n=== fix_commit 패턴 추출 테스트 ===');
 
-// 검증: 커밋 메시지가 패턴으로 사용되는지
 const fixMessage = 'fix: update harness.jsonc config for model X';
-assert(fixMessage === fixMessage, 'fix_commit: 커밋 메시지 = 패턴');
-
-// 검증: source_file이 빈 문자열이어야 함 (파일 경로를 패턴으로 사용 금지)
-const emptySourceFile = '';
-assert(emptySourceFile === '', 'fix_commit: source_file은 빈 문자열');
-
-// 검증: 파일 경로가 패턴에 들어가지 않음
-const harnessJsonc = 'harness.jsonc';
-const patternShouldNotBeFile = 'fix: update harness.jsonc config';
-assert(patternShouldNotBeFile !== harnessJsonc, 'fix_commit: 패턴에 파일 경로가 포함되지 않음');
-assert(patternShouldNotBeFile.includes('harness.jsonc') === true || patternShouldNotBeFile.startsWith('fix'), 'fix_commit: 패턴은 커밋 메시지 전체');
+const fixPayload = buildFixCommitSignalPayload(fixMessage, 'abc123', ['src/index.ts']);
+assert((fixPayload.payload as { pattern: string }).pattern === fixMessage, 'fix_commit: 커밋 메시지 = 패턴');
+assert((fixPayload.payload as { source_file: string }).source_file === '', 'fix_commit: source_file은 빈 문자열');
+assert(JSON.stringify((fixPayload.payload as { affected_files: string[] }).affected_files) === JSON.stringify(['src/index.ts']), 'fix_commit: affected_files 유지');
+assert(escapeRegexLiteral('fix: use (paren) [chars].') === 'fix: use \\(paren\\) \\[chars\\]\\.', 'fix_commit: regex literal escape');
 
 // 검증: mapSignalTypeToScope('fix_commit')은 'tool' 스코프
 // (실제 함수를 직접 테스트할 수 없으므로 논리 검증)
 const fixCommitScope = 'tool'; // expected after fix
-const wrongScope = 'file';     // old behavior (bug)
+const wrongScope = 'file' as string;     // old behavior (bug)
 assert(fixCommitScope !== wrongScope, 'fix_commit: scope가 tool이어야 함 (file 아님)');
+
+console.log('\n=== compacting bounds 테스트 ===');
+const boundedContext = buildBoundedCompactionContext([
+    'A'.repeat(4000),
+    'B'.repeat(4000),
+    'C'.repeat(4000),
+], 6000);
+assert(boundedContext.length === 2, 'compacting: ceiling 내에서 2개 파트 유지');
+assert(boundedContext[0].length === 4000, 'compacting: 우선순위 상단 파트 보존');
+assert(boundedContext[1].length <= 2000, 'compacting: 하위 파트는 ceiling에 맞게 절단');
 
 // === 정리 ===
 console.log('\n=== 테스트 결과 ===');

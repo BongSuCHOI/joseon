@@ -38,6 +38,10 @@ function isValidPattern(pattern: string): boolean {
     return true;
 }
 
+export function escapeRegexLiteral(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function appendHistory(event: string, data: Record<string, unknown>): void {
     const historyPath = join(HARNESS_DIR, 'rules', 'history.jsonl');
     try {
@@ -64,6 +68,41 @@ function loadJsonFiles<T>(dir: string): T[] {
         } catch { /* 파싱 실패한 파일은 무시 */ }
     }
     return items;
+}
+
+export function buildFixCommitSignalPayload(message: string, hash: string, files: string[]): Record<string, unknown> {
+    const pattern = message.trim();
+    return {
+        type: 'fix_commit',
+        payload: {
+            description: `fix 커밋 감지: ${pattern}`,
+            pattern,
+            source_file: '',
+            affected_files: files,
+            recurrence_count: 1,
+            related_signals: [hash],
+        },
+    };
+}
+
+export function buildBoundedCompactionContext(parts: string[], charCeiling: number): string[] {
+    const bounded: string[] = [];
+    let used = 0;
+
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        if (used >= charCeiling) break;
+
+        const remaining = charCeiling - used;
+        const next = trimmed.length <= remaining ? trimmed : `${trimmed.slice(0, Math.max(0, remaining - 1)).trimEnd()}…`;
+        if (!next.trim()) break;
+
+        bounded.push(next);
+        used += next.length;
+    }
+
+    return bounded;
 }
 
 // ─── Phase 2: syncRulesMarkdown — .opencode/rules/ 마크다운 동기화 ──
@@ -137,11 +176,13 @@ function signalToRule(signal: Signal, worktree: string): void {
     const pattern = signal.payload.pattern || signal.payload.description;
     if (!pattern) return;
 
+    const normalizedPattern = signal.type === 'fix_commit' ? escapeRegexLiteral(pattern) : pattern;
+
     // #7: 과도하게 넓은 패턴 거부
-    if (!isValidPattern(pattern)) {
+    if (!isValidPattern(normalizedPattern)) {
         appendHistory('rule_rejected', {
             signal_id: signal.id,
-            pattern,
+            pattern: normalizedPattern,
             reason: 'invalid_or_too_broad_pattern',
         });
         return;
@@ -152,7 +193,7 @@ function signalToRule(signal: Signal, worktree: string): void {
     if (sourceFile && isPluginSource(sourceFile)) {
         appendHistory('rule_rejected', {
             signal_id: signal.id,
-            pattern,
+            pattern: normalizedPattern,
             reason: 'targets_plugin_source',
             source_file: sourceFile,
         });
@@ -160,7 +201,7 @@ function signalToRule(signal: Signal, worktree: string): void {
     }
 
     // 중복 체크 (soft + hard 양쪽)
-    if (ruleExists(pattern, signal.project_key)) {
+    if (ruleExists(normalizedPattern, signal.project_key)) {
         // 중복이면 signal을 ack로만 이동 (규칙 생성 없음)
         return;
     }
@@ -173,7 +214,7 @@ function signalToRule(signal: Signal, worktree: string): void {
         source_signal_id: signal.id,
         pattern: {
             type: 'code',
-            match: pattern,
+            match: normalizedPattern,
             scope: mapSignalTypeToScope(signal.type),
         },
         description: signal.payload.description,
@@ -184,18 +225,18 @@ function signalToRule(signal: Signal, worktree: string): void {
     mkdirSync(join(HARNESS_DIR, 'rules/soft'), { recursive: true });
 
     // #1: write 직전에 한 번 더 중복 체크 (TOCTOU 경쟁 완화)
-    if (existsSync(rulePath) || ruleExists(pattern, signal.project_key)) {
+    if (existsSync(rulePath) || ruleExists(normalizedPattern, signal.project_key)) {
         return;
     }
 
     writeFileSync(rulePath, JSON.stringify(rule, null, 2));
 
-    appendHistory('rule_created', {
-        rule_id: rule.id,
-        signal_id: signal.id,
-        pattern: rule.pattern.match,
-        scope: rule.pattern.scope,
-    });
+        appendHistory('rule_created', {
+            rule_id: rule.id,
+            signal_id: signal.id,
+            pattern: normalizedPattern,
+            scope: rule.pattern.scope,
+        });
 
     // Phase 2: 규칙 생성 후 마크다운 동기화
     syncRulesMarkdown(worktree);
@@ -358,22 +399,10 @@ function detectFixCommits(worktree: string, projectKey: string): void {
         // 3번째 줄부터 파일 목록
         const files = lines.slice(2).filter((l) => l.trim().length > 0);
 
-        // fix_commit signal 생성
-        // NOTE: source_file(파일 경로)을 pattern으로 사용하지 않음.
-        // "A 파일에서 버그를 고쳤다" ≠ "A 파일을 수정하지 마라" (논리적 오류).
-        // 파일 경로가 패턴이 되면 설정 파일(harness.jsonc 등)의 정당한 수정이 차단됨.
-        // diff 기반 실수 패턴 학습은 고도화 단계에서 LLM 기반으로 구현 예정.
+        // fix_commit signal 생성 (message-based contract 유지)
         const signal: Record<string, unknown> = {
-            type: 'fix_commit',
+            ...buildFixCommitSignalPayload(message, hash, files),
             project_key: projectKey,
-            payload: {
-                description: `fix 커밋 감지: ${message.trim()}`,
-                pattern: message.trim(),
-                source_file: '',
-                affected_files: files,
-                recurrence_count: 1,
-                related_signals: [hash],
-            },
         };
 
         const id = generateId();
@@ -548,8 +577,13 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
         .filter((r) => r.project_key === projectKey || r.project_key === 'global');
     if (softRules.length > 0) {
-        const descriptions = softRules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
-        parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
+        const prioritizedSoftRules = softRules
+            .sort((a, b) => (b.violation_count - a.violation_count) || b.created_at.localeCompare(a.created_at))
+            .slice(0, maxResults);
+        if (prioritizedSoftRules.length > 0) {
+            const descriptions = prioritizedSoftRules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
+            parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
+        }
     }
 
     // Phase 3: Memory Search — 관련 fact 주입
@@ -565,7 +599,7 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
         parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
     }
 
-    return parts;
+    return buildBoundedCompactionContext(parts, 12000);
 }
 
 // ─── 3.1 Main Plugin Export ─────────────────────────────

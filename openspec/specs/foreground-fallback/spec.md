@@ -40,3 +40,18 @@
 #### Scenario: No chain when neither exists
 - **WHEN** 에이전트에 model 배열도 없고 `fallback.chains.agentName`도 없음
 - **THEN** 빈 체인이 됨 (fallback 없이 단일 모델로 동작)
+
+### Requirement: Foreground fallback retries in the same session
+`foreground-fallback`는 retryable provider 실패가 나면 현재 세션을 abort하고 다음 모델로 `prompt_async`를 다시 호출한다. config reload나 다음 등록 시점에 의존하지 않는다.
+
+#### Scenario: Retryable failure recovers with next model
+- **WHEN** foreground 요청이 rate limit 같은 retryable provider 실패로 끝남
+- **THEN** 현재 세션을 abort하고 다음 모델로 같은 세션에서 즉시 재프롬프트함
+
+#### Scenario: Failed re-prompt does not advance state
+- **WHEN** 다음 모델로 `prompt_async` 재호출이 실패함
+- **THEN** fallback state가 진행되지 않고 같은 모델 위치에서 다음 시도에 재사용됨
+
+#### Scenario: Chained fallback continues before sync events
+- **WHEN** 같은 세션에서 연속 fallback이 필요함
+- **THEN** sync 이벤트를 기다리지 않고 다음 모델 체인이 이어짐

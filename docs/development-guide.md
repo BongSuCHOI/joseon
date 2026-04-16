@@ -30,6 +30,8 @@
 │   ├── post-file-tool-nudge.ts
 │   ├── post-read-nudge.ts
 │   ├── phase-reminder.ts
+│   ├── foreground-fallback.ts   # abort + prompt_async 재프롬프트로 same-session 복구
+│   ├── filter-available-skills.ts
 │   └── index.ts          # createAllHooks()
 ├── harness/
 │   ├── observer.ts
@@ -40,7 +42,7 @@
 │   ├── phase-manager.ts
 │   ├── error-recovery.ts
 │   └── qa-tracker.ts
-└── agents/
+└── agents/               # 11개 에이전트
     ├── agents.ts
     └── prompts/
 ```
@@ -445,7 +447,7 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-14 | A2 | Config 시스템 구현 | ✅ | schema.ts + loader.ts 신규. JSONC 파싱 + 글로벌/프로젝트 병합 |
 | 2026-04-14 | A2 | 에이전트 config 오버라이드 | ✅ | agents.ts applyOverrides()로 model/temperature/hidden 오버라이드 |
 | 2026-04-14 | A2 | enforcer/improver/error-recovery/qa-tracker config 연동 | ✅ | 각 모듈에 settings 파라미터 전달 |
-| 2026-04-14 | A3 | Hooks 보강 (5개) | ✅ | delegate-task-retry, json-error-recovery, post-file-tool-nudge, post-read-nudge, phase-reminder |
+| 2026-04-14 | A3 | Hooks 보강 | ✅ | delegate-task-retry, json-error-recovery, post-file-tool-nudge, post-read-nudge, phase-reminder |
 | 2026-04-14 | A3 | createAllHooks() + 다중 핸들러 병합 | ✅ | hooks/index.ts에서 createAllHooks()로 일괄 생성 |
 | 2026-04-14 | A1~A3 | 전체 스모크 테스트 (247/247) | ✅ | smoke 21 + step3 50 + step4 121 + error-recovery 24 + phase-manager 22 + session-lock 9 |
 | 2026-04-14 | A1~A3 | npm run build | ✅ | 타입 에러 없음 |
@@ -463,6 +465,12 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-15 | B3 | smoke test — SubagentDepthTracker (8/8) | ✅ | 등록/깊이조회/cleanup/cleanupAll/max초과차단/커스텀maxDepth |
 | 2026-04-15 | B3 | 전체 스모크 테스트 (248/248) | ✅ | smoke 29 + step3 50 + step4 169 |
 | 2026-04-15 | B3 | npm run build | ✅ | 타입 에러 없음 |
+| 2026-04-16 | Step 4f | stability follow-up smoke | ✅ | bounded compacting, foreground-fallback, filter-available-skills 회귀 없음 |
+| 2026-04-16 | Step 4f | foreground-fallback same-session recovery | ✅ | retryable provider failure 시 abort + next model prompt_async 재프롬프트 확인 |
+| 2026-04-16 | Step 4f | foreground-fallback chained continuation | ✅ | sync 이벤트 전에 chained fallback이 이어지는지 확인 |
+| 2026-04-16 | Step 4f | foreground-fallback prompt_async failure rollback | ✅ | 재프롬프트 실패 시 fallback state advancement 없음 확인 |
+| 2026-04-16 | Step 4f | fix_commit hardening | ✅ | source_file 금지 + fix_commit scope를 tool로 고정 |
+| 2026-04-16 | Step 4f | npm run build | ✅ | 안정화 후속 반영 후 빌드 성공 |
 | 2026-04-16 | Deploy Prep | deny_tools 스키마 + buildToolPermissions | ✅ | AgentOverrideConfig에 deny_tools 필드, buildToolPermissions() + config 콜백 병합 |
 | 2026-04-16 | Deploy Prep | harness.jsonc deny_tools 예시 | ✅ | reviewer, advisor, explorer, librarian에 write/edit/patch/bash, designer에 bash |
 | 2026-04-16 | Deploy Prep | README.md 모델/MCP/빠른시작 | ✅ | 권장 모델 매핑 테이블, 권장 MCP 서버, 빠른 시작 가이드 추가 |

@@ -1,16 +1,35 @@
 import { createDelegateTaskRetryHook } from './delegate-task-retry.js';
 import { createJsonErrorRecoveryHook } from './json-error-recovery.js';
+import { createFilterAvailableSkillsHook } from './filter-available-skills.js';
+import { createForegroundFallbackController, createForegroundFallbackHook } from './foreground-fallback.js';
 import { createPostFileToolNudgeHook } from './post-file-tool-nudge.js';
 import { createPostReadNudgeHook } from './post-read-nudge.js';
 import { createPhaseReminderHook } from './phase-reminder.js';
+import type { HarnessConfig } from '../config/index.js';
+import type { AgentDefinition } from '../agents/agents.js';
 
-export function createAllHooks(): Record<string, (...args: unknown[]) => Promise<void>> {
+export type HookContext = {
+    worktree: string;
+    harnessConfig?: HarnessConfig;
+    agentsByName: Record<string, AgentDefinition>;
+    foregroundFallback: ReturnType<typeof createForegroundFallbackController>;
+    sessionAgents: Map<string, string>;
+    fallbackEnabled: boolean;
+    client?: unknown;
+};
+
+export { createForegroundFallbackController, isRetryableModelFailure } from './foreground-fallback.js';
+export { filterAvailableSkillsBlock } from './filter-available-skills.js';
+
+export function createAllHooks(context: HookContext): Record<string, (...args: unknown[]) => Promise<void>> {
     const hooks = [
         createDelegateTaskRetryHook(),
         createJsonErrorRecoveryHook(),
         createPostFileToolNudgeHook(),
         createPostReadNudgeHook(),
         createPhaseReminderHook(),
+        createFilterAvailableSkillsHook({ harnessConfig: context.harnessConfig, sessionAgents: context.sessionAgents }),
+        createForegroundFallbackHook({ worktree: context.worktree, agentsByName: context.agentsByName, fallbackEnabled: context.fallbackEnabled, client: context.client }, context.foregroundFallback),
     ];
 
     const merged: Record<string, Array<(...args: unknown[]) => Promise<void>>> = {};

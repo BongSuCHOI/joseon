@@ -12,6 +12,10 @@ import { createAgents } from '../src/agents/agents.js';
 import { SubagentDepthTracker } from '../src/orchestrator/subagent-depth.js';
 import plugin from '../src/index.js';
 import { HARNESS_DIR } from '../src/shared/index.js';
+import { filterAvailableSkillsBlock } from '../src/hooks/filter-available-skills.js';
+import { createForegroundFallbackController, isRetryableModelFailure } from '../src/hooks/foreground-fallback.js';
+import { createFilterAvailableSkillsHook } from '../src/hooks/filter-available-skills.js';
+import { createForegroundFallbackHook } from '../src/hooks/foreground-fallback.js';
 
 let passed = 0;
 let failed = 0;
@@ -333,7 +337,7 @@ try {
 
     // 4C-2. config callback — 기본 agent 등록 + default_agent 검증
     console.log('\n[4C-2] config callback — agent 등록 + permission 보존');
-    const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
+    const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() }) as { config: (config: Record<string, unknown>) => Promise<void> };
     assert(typeof serverResult.config === 'function', 'config가 함수');
     const cbConfig: Record<string, unknown> = {};
     await serverResult.config(cbConfig);
@@ -350,9 +354,9 @@ try {
     // 5-0. deny_tools 통합 테스트 — config 콜백에서 deny_tools가 permission에 병합되는지
     console.log('[5-0] deny_tools → permission 병합 테스트');
     // harness.jsonc에 deny_tools가 설정된 상태에서 플러그인을 로드
-    const denyServerResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() });
+    const denyServerResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() }) as { config: (config: Record<string, unknown>) => Promise<void> };
     const denyConfig: Record<string, unknown> = {};
-    await (denyServerResult.config as Function)(denyConfig);
+    await denyServerResult.config(denyConfig);
     const denyAgentMap = denyConfig.agent as Record<string, any>;
     // reviewer: deny_tools: ["write", "edit", "patch", "bash"] + file_edit: "deny"
     assert(denyAgentMap.reviewer?.permission?.write === 'deny', 'deny_tools: reviewer write === deny');
@@ -388,6 +392,361 @@ try {
     assert(typeof agentMap.designer === 'object', 'designer 에이전트 등록됨');
     assert(typeof agentMap.coder === 'object', 'coder 에이전트 등록됨');
     assert(typeof agentMap.advisor === 'object', 'advisor 에이전트 등록됨');
+
+    // ============================================================
+    // 5B. Stability Follow-up Hooks
+    // ============================================================
+    console.log('\n--- 5B. Stability Follow-up Hooks ---\n');
+
+    // 5B-1. skill catalog filtering at prompt layer
+    console.log('[5B-1] skill catalog filtering');
+    const skillPrompt = [
+        'prefix',
+        '<available_skills>',
+        '<skill>',
+        '  <name>frontend</name>',
+        '  <description>frontend skill</description>',
+        '  <location>file:///tmp/frontend</location>',
+        '</skill>',
+        '<skill>',
+        '  <name>backend</name>',
+        '  <description>backend skill</description>',
+        '  <location>file:///tmp/backend</location>',
+        '</skill>',
+        '<skill>',
+        '  <name>tester</name>',
+        '  <description>tester skill</description>',
+        '  <location>file:///tmp/tester</location>',
+        '</skill>',
+        '</available_skills>',
+        'suffix',
+    ].join('\n');
+    const filteredPrompt = filterAvailableSkillsBlock(skillPrompt, ['frontend', '!backend'], ['frontend', 'backend', 'tester']);
+    assert(filteredPrompt.includes('frontend skill'), 'skill filter: allowed skill remains');
+    assert(!filteredPrompt.includes('backend skill'), 'skill filter: denied skill removed');
+    assert(!filteredPrompt.includes('tester skill'), 'skill filter: non-allowed skill removed');
+    const emptyPrompt = filterAvailableSkillsBlock(skillPrompt, undefined, ['frontend', 'backend', 'tester']);
+    assert(!emptyPrompt.includes('<skill>'), 'skill filter: empty config removes all skills');
+
+    // 5B-2. foreground fallback state tracks reactive session recovery
+    console.log('[5B-2] foreground fallback state');
+    const fallbackWorktree = join(tmpdir(), `step4-fallback-test-${Date.now()}`);
+    mkdirSync(fallbackWorktree, { recursive: true });
+    const fallbackController = createForegroundFallbackController(fallbackWorktree);
+    fallbackController.recordSession('session-1', 'frontend', ['model-a', 'model-b', 'model-c']);
+    assert(fallbackController.resolveModel('frontend', 'model-a', ['model-a', 'model-b', 'model-c']) === 'model-a', 'fallback: initial model selected');
+    assert(isRetryableModelFailure('rate limit exceeded') === true, 'fallback: retryable failure detected');
+    assert(fallbackController.advanceOnFailure('session-1', 'rate limit exceeded') === true, 'fallback: cursor advanced on retryable failure');
+    assert(fallbackController.resolveModel('frontend', 'model-a', ['model-a', 'model-b', 'model-c']) === 'model-b', 'fallback: next model selected on next turn');
+    assert(fallbackController.advanceOnFailure('session-1', 'rate limit exceeded') === false, 'fallback: same session advances only once');
+    fallbackController.clearSession('session-1');
+    const fallbackStateFile = fallbackController.statePath;
+    assert(existsSync(fallbackStateFile), 'fallback: state file persisted');
+    if (existsSync(fallbackStateFile)) {
+        const state = JSON.parse(readFileSync(fallbackStateFile, 'utf-8')) as { agents?: Record<string, { cursor: number; last_failure?: string }> };
+        assert(state.agents?.frontend?.cursor === 1, 'fallback: cursor persisted at 1');
+        assert(typeof state.agents?.frontend?.last_failure === 'string', 'fallback: failure metadata persisted');
+    }
+    rmSync(join(HARNESS_DIR, 'projects', fallbackController.projectKey), { recursive: true, force: true });
+    rmSync(fallbackWorktree, { recursive: true, force: true });
+
+    const disabledWorktree = join(tmpdir(), `step4-fallback-disabled-${Date.now()}`);
+    const disabledController = createForegroundFallbackController(disabledWorktree, false);
+    assert(disabledController.resolveModel('frontend', 'model-a', ['model-a', 'model-b']) === 'model-a', 'fallback: disabled keeps primary model');
+    disabledController.recordSession('session-disabled', 'frontend', ['model-a', 'model-b']);
+    assert(disabledController.advanceOnFailure('session-disabled', 'rate limit exceeded') === false, 'fallback: disabled does not advance');
+    rmSync(join(HARNESS_DIR, 'projects', disabledController.projectKey), { recursive: true, force: true });
+    rmSync(disabledWorktree, { recursive: true, force: true });
+
+    // 5B-3. foreground fallback reactive session recovery
+    console.log('[5B-3] foreground fallback reactive recovery');
+    const fallbackRecoveryWorktree = join(tmpdir(), `step4-fallback-recovery-${Date.now()}`);
+    mkdirSync(fallbackRecoveryWorktree, { recursive: true });
+    const fallbackRecoveryController = createForegroundFallbackController(fallbackRecoveryWorktree);
+    const runtimeCalls: Array<{ method: string; args: unknown[] }> = [];
+    const runtimeClient = {
+        session: {
+            messages: [
+                {
+                    info: { role: 'user', sessionID: 'fallback-session' },
+                    parts: [{ type: 'text', text: 'First user message' }],
+                },
+                {
+                    info: { role: 'assistant', sessionID: 'fallback-session' },
+                    parts: [{ type: 'text', text: 'Assistant reply' }],
+                },
+                {
+                    info: { role: 'user', sessionID: 'fallback-session' },
+                    parts: [{ type: 'text', text: 'Latest user message' }],
+                },
+            ],
+            abort: async (...args: unknown[]) => {
+                runtimeCalls.push({ method: 'abort', args });
+            },
+            prompt_async: async (...args: unknown[]) => {
+                runtimeCalls.push({ method: 'prompt_async', args });
+            },
+        },
+    };
+    const recoveryAgents = createAgents({
+        agents: { frontend: { model: ['model-a', 'model-b', 'model-c'] } },
+        fallback: { chains: { frontend: ['model-a', 'model-b', 'model-c'] } },
+    });
+    const recoveryAgentMap = Object.fromEntries(recoveryAgents.map((agent) => [agent.name, agent]));
+    const fallbackRecoveryHook = createForegroundFallbackHook({
+        worktree: fallbackRecoveryWorktree,
+        agentsByName: recoveryAgentMap as any,
+        fallbackEnabled: true,
+        client: runtimeClient as any,
+    } as any, fallbackRecoveryController);
+
+    await fallbackRecoveryHook['chat.params']({
+        sessionID: 'fallback-session',
+        agent: 'frontend',
+        model: { providerID: 'provider-a', modelID: 'model-a' },
+        provider: {},
+        message: { id: 'msg-1', sessionID: 'fallback-session', role: 'user', time: { created: Date.now() }, agent: 'frontend', model: { providerID: 'provider-a', modelID: 'model-a' } },
+    } as any);
+    await fallbackRecoveryHook.event({ event: { type: 'message.updated', properties: { sessionID: 'fallback-session', info: { id: 'msg-2', sessionID: 'fallback-session', role: 'assistant', modelID: 'model-a', providerID: 'provider-a' } } } });
+    await fallbackRecoveryHook.event({ event: { type: 'session.status', properties: { sessionID: 'fallback-session', status: 'running', modelID: 'model-a' } } });
+    await fallbackRecoveryHook.event({ event: { type: 'session.error', properties: { sessionID: 'fallback-session', error: new Error('rate limit exceeded') } } });
+
+    assert(fallbackRecoveryController.getSessionState('fallback-session')?.currentModel === 'model-b', 'fallback recovery: current model advances to the re-prompted model');
+    assert(runtimeCalls.filter((call) => call.method === 'abort').length === 1, 'fallback recovery: abort called once');
+    assert(runtimeCalls.filter((call) => call.method === 'prompt_async').length === 1, 'fallback recovery: prompt_async called once');
+    assert(runtimeCalls.some((call) => call.method === 'prompt_async' && Array.isArray(call.args) && (() => {
+        const payload = call.args[0] as { modelID?: string; model?: { providerID?: string; modelID?: string }; parts?: unknown[] } | undefined;
+        return String(payload?.model?.providerID ?? '') === 'provider-a'
+            && String(payload?.model?.modelID ?? '') === 'model-b'
+            && Array.isArray(payload?.parts)
+            && payload?.parts.length === 1
+            && typeof (payload.parts[0] as { text?: string } | undefined)?.text === 'string'
+            && (payload.parts[0] as { text?: string }).text === 'Latest user message';
+    })()), 'fallback recovery: re-prompts next model');
+    assert(fallbackRecoveryController.resolveModel('frontend', 'model-a', ['model-a', 'model-b', 'model-c']) === 'model-b', 'fallback recovery: controller advanced to model-b');
+    rmSync(join(HARNESS_DIR, 'projects', fallbackRecoveryController.projectKey), { recursive: true, force: true });
+    rmSync(fallbackRecoveryWorktree, { recursive: true, force: true });
+
+    // 5B-3a. foreground fallback continues the chain before sync events arrive
+    console.log('[5B-3a] foreground fallback chained continuation');
+    const chainedFallbackWorktree = join(tmpdir(), `step4-fallback-chained-${Date.now()}`);
+    mkdirSync(chainedFallbackWorktree, { recursive: true });
+    const chainedFallbackController = createForegroundFallbackController(chainedFallbackWorktree);
+    const chainedCalls: Array<{ method: string; args: unknown[] }> = [];
+    const chainedRuntimeClient = {
+        session: {
+            messages: [
+                {
+                    info: { role: 'user', sessionID: 'chained-session' },
+                    parts: [{ type: 'text', text: 'Chained user message' }],
+                },
+            ],
+            abort: async (...args: unknown[]) => {
+                chainedCalls.push({ method: 'abort', args });
+            },
+            prompt_async: async (...args: unknown[]) => {
+                chainedCalls.push({ method: 'prompt_async', args });
+            },
+        },
+    };
+    const chainedAgents = createAgents({
+        agents: { frontend: { model: ['model-a', 'model-b', 'model-c'] } },
+        fallback: { chains: { frontend: ['model-a', 'model-b', 'model-c'] } },
+    });
+    const chainedAgentMap = Object.fromEntries(chainedAgents.map((agent) => [agent.name, agent]));
+    const chainedFallbackHook = createForegroundFallbackHook({
+        worktree: chainedFallbackWorktree,
+        agentsByName: chainedAgentMap as any,
+        fallbackEnabled: true,
+        client: chainedRuntimeClient as any,
+    } as any, chainedFallbackController);
+
+    await chainedFallbackHook['chat.params']({
+        sessionID: 'chained-session',
+        agent: 'frontend',
+        model: { providerID: 'provider-a', modelID: 'model-a' },
+        provider: {},
+        message: { id: 'msg-chained-1', sessionID: 'chained-session', role: 'user', time: { created: Date.now() }, agent: 'frontend', model: { providerID: 'provider-a', modelID: 'model-a' } },
+    } as any);
+    await chainedFallbackHook.event({ event: { type: 'session.error', properties: { sessionID: 'chained-session', error: new Error('rate limit exceeded') } } });
+    await chainedFallbackHook.event({ event: { type: 'session.error', properties: { sessionID: 'chained-session', error: new Error('rate limit exceeded') } } });
+
+    const chainedPromptCalls = chainedCalls.filter((call) => call.method === 'prompt_async');
+    assert(chainedPromptCalls.length === 2, 'fallback chain: second failure re-prompts again before sync events');
+    assert(chainedPromptCalls.some((call, index) => index === 1 && Array.isArray(call.args) && (() => {
+        const payload = call.args[0] as { model?: { providerID?: string; modelID?: string } } | undefined;
+        return String(payload?.model?.providerID ?? '') === 'provider-a' && String(payload?.model?.modelID ?? '') === 'model-c';
+    })()), 'fallback chain: second failure advances to model-c');
+    assert(chainedFallbackController.resolveModel('frontend', 'model-a', ['model-a', 'model-b', 'model-c']) === 'model-c', 'fallback chain: controller cursor advanced to model-c');
+    rmSync(join(HARNESS_DIR, 'projects', chainedFallbackController.projectKey), { recursive: true, force: true });
+    rmSync(chainedFallbackWorktree, { recursive: true, force: true });
+
+    // 5B-3b. foreground fallback prompt_async failure must not count as success
+    console.log('[5B-3b] foreground fallback prompt_async failure');
+    const failedPromptWorktree = join(tmpdir(), `step4-fallback-failed-prompt-${Date.now()}`);
+    mkdirSync(failedPromptWorktree, { recursive: true });
+    const failedPromptController = createForegroundFallbackController(failedPromptWorktree);
+    const failedPromptCalls: Array<{ method: string; args: unknown[] }> = [];
+    const failedPromptRuntimeClient = {
+        session: {
+            messages: [
+                {
+                    info: { role: 'user', sessionID: 'failed-prompt-session' },
+                    parts: [{ type: 'text', text: 'Failed prompt user message' }],
+                },
+            ],
+            abort: async (...args: unknown[]) => {
+                failedPromptCalls.push({ method: 'abort', args });
+            },
+            prompt_async: async (...args: unknown[]) => {
+                failedPromptCalls.push({ method: 'prompt_async', args });
+                throw new Error('prompt_async unavailable');
+            },
+        },
+    };
+    const failedPromptAgents = createAgents({
+        agents: { frontend: { model: ['model-a', 'model-b'] } },
+        fallback: { chains: { frontend: ['model-a', 'model-b'] } },
+    });
+    const failedPromptAgentMap = Object.fromEntries(failedPromptAgents.map((agent) => [agent.name, agent]));
+    const failedPromptHook = createForegroundFallbackHook({
+        worktree: failedPromptWorktree,
+        agentsByName: failedPromptAgentMap as any,
+        fallbackEnabled: true,
+        client: failedPromptRuntimeClient as any,
+    } as any, failedPromptController);
+
+    await failedPromptHook['chat.params']({
+        sessionID: 'failed-prompt-session',
+        agent: 'frontend',
+        model: { providerID: 'provider-a', modelID: 'model-a' },
+        provider: {},
+        message: { id: 'msg-failed-1', sessionID: 'failed-prompt-session', role: 'user', time: { created: Date.now() }, agent: 'frontend', model: { providerID: 'provider-a', modelID: 'model-a' } },
+    } as any);
+    await failedPromptHook.event({ event: { type: 'session.error', properties: { sessionID: 'failed-prompt-session', error: new Error('rate limit exceeded') } } });
+
+    assert(failedPromptCalls.filter((call) => call.method === 'abort').length === 1, 'fallback failure: abort still attempted');
+    assert(failedPromptCalls.filter((call) => call.method === 'prompt_async').length >= 1, 'fallback failure: prompt_async attempted');
+    assert(failedPromptController.resolveModel('frontend', 'model-a', ['model-a', 'model-b']) === 'model-a', 'fallback failure: controller does not advance on prompt_async failure');
+    assert(existsSync(failedPromptController.statePath) === false, 'fallback failure: no state persisted on failed re-prompt');
+    rmSync(join(HARNESS_DIR, 'projects', failedPromptController.projectKey), { recursive: true, force: true });
+    rmSync(failedPromptWorktree, { recursive: true, force: true });
+
+    // 5B-3c. foreground fallback method-shaped messages + full model IDs
+    console.log('[5B-3c] foreground fallback compatibility shapes');
+    const methodFallbackWorktree = join(tmpdir(), `step4-fallback-method-${Date.now()}`);
+    mkdirSync(methodFallbackWorktree, { recursive: true });
+    const methodFallbackController = createForegroundFallbackController(methodFallbackWorktree);
+    const methodCalls: Array<{ method: string; args: unknown[] }> = [];
+    const methodRuntimeClient = {
+        session: {
+            messages: async () => ([
+                {
+                    info: { role: 'user', sessionID: 'fallback-session-method' },
+                    parts: [{ type: 'text', text: 'Method user message' }],
+                },
+                {
+                    info: { role: 'assistant', sessionID: 'fallback-session-method' },
+                    parts: [{ type: 'text', text: 'Method assistant reply' }],
+                },
+                {
+                    info: { role: 'user', sessionID: 'fallback-session-method' },
+                    parts: [{ type: 'text', text: 'Method latest user message' }],
+                },
+            ]),
+            abort: async (...args: unknown[]) => {
+                methodCalls.push({ method: 'abort', args });
+            },
+            prompt_async: async (...args: unknown[]) => {
+                methodCalls.push({ method: 'prompt_async', args });
+            },
+        },
+    };
+    const methodAgents = createAgents({
+        agents: { frontend: { model: ['provider-a/model-a', 'provider-a/model-b'] } },
+        fallback: { chains: { frontend: ['provider-a/model-a', 'provider-a/model-b'] } },
+    });
+    const methodAgentMap = Object.fromEntries(methodAgents.map((agent) => [agent.name, agent]));
+    const methodFallbackHook = createForegroundFallbackHook({
+        worktree: methodFallbackWorktree,
+        agentsByName: methodAgentMap as any,
+        fallbackEnabled: true,
+        client: methodRuntimeClient as any,
+    } as any, methodFallbackController);
+
+    await methodFallbackHook['chat.params']({
+        sessionID: 'fallback-session-method',
+        agent: 'frontend',
+        model: { providerID: 'provider-a', modelID: 'model-a' },
+        provider: {},
+        message: { id: 'msg-method-1', sessionID: 'fallback-session-method', role: 'user', time: { created: Date.now() }, agent: 'frontend', model: { providerID: 'provider-a', modelID: 'model-a' } },
+    } as any);
+    await methodFallbackHook.event({ event: { type: 'session.error', properties: { sessionID: 'fallback-session-method', error: new Error('rate limit exceeded') } } });
+
+    assert(methodCalls.filter((call) => call.method === 'abort').length === 1, 'fallback compatibility: abort called once for method-shaped messages');
+    assert(methodCalls.filter((call) => call.method === 'prompt_async').length === 1, 'fallback compatibility: prompt_async called once for method-shaped messages');
+    assert(methodCalls.some((call) => call.method === 'prompt_async' && Array.isArray(call.args) && (() => {
+        const payload = call.args[0] as { modelID?: string; model?: { providerID?: string; modelID?: string }; parts?: unknown[] } | undefined;
+        return String(payload?.model?.providerID ?? '') === 'provider-a'
+            && String(payload?.model?.modelID ?? '') === 'model-b'
+            && String(payload?.modelID ?? '') === 'model-b'
+            && Array.isArray(payload?.parts)
+            && payload?.parts.length === 1
+            && typeof (payload.parts[0] as { text?: string } | undefined)?.text === 'string'
+            && (payload.parts[0] as { text?: string }).text === 'Method latest user message';
+    })()), 'fallback compatibility: method messages and full model IDs preserved');
+    rmSync(join(HARNESS_DIR, 'projects', methodFallbackController.projectKey), { recursive: true, force: true });
+    rmSync(methodFallbackWorktree, { recursive: true, force: true });
+
+    // 5B-4. foreground fallback config path ignores persisted cursor for foreground recovery
+    console.log('[5B-4] foreground fallback config path');
+    const configFallbackWorktree = join(tmpdir(), `step4-fallback-config-${Date.now()}`);
+    mkdirSync(join(configFallbackWorktree, '.opencode'), { recursive: true });
+    writeFileSync(join(configFallbackWorktree, '.opencode', 'harness.jsonc'), JSON.stringify({ agents: { frontend: { model: ['model-a', 'model-b'] } } }, null, 2));
+    const configFallbackController = createForegroundFallbackController(configFallbackWorktree);
+    mkdirSync(join(HARNESS_DIR, 'projects', configFallbackController.projectKey), { recursive: true });
+    writeFileSync(join(HARNESS_DIR, 'projects', configFallbackController.projectKey, 'foreground-fallback.json'), JSON.stringify({ agents: { frontend: { cursor: 1, updated_at: new Date().toISOString(), last_session_id: 'stale-session', last_failure: 'rate limit exceeded' } } }, null, 2));
+    const pluginInstance = await plugin.server({ project: {}, client: {} as any, $: {} as any, directory: configFallbackWorktree, worktree: configFallbackWorktree } as any);
+    const opencodeConfig: Record<string, unknown> = { agent: {} };
+    await (pluginInstance as { config: (cfg: Record<string, unknown>) => Promise<void> }).config(opencodeConfig);
+    const frontendAgent = (opencodeConfig.agent as Record<string, { model?: string }>).frontend;
+    assert(frontendAgent?.model === 'model-a', 'fallback config: persisted cursor does not override current session model');
+    rmSync(join(HARNESS_DIR, 'projects', configFallbackController.projectKey), { recursive: true, force: true });
+    rmSync(configFallbackWorktree, { recursive: true, force: true });
+
+    // 5B-5. hook lifecycle order
+    console.log('[5B-5] hook lifecycle order');
+    const lifecycleSkillContext = {
+        harnessConfig: {
+            agents: {
+                frontend: { skills: ['frontend'] },
+            },
+        },
+        sessionAgents: new Map<string, string>(),
+    };
+    const lifecycleSkillHook = createFilterAvailableSkillsHook(lifecycleSkillContext as any);
+    await lifecycleSkillHook['chat.params']({ sessionID: 'skill-session', agent: 'frontend' });
+    await lifecycleSkillHook.event({ event: { type: 'session.created', properties: { sessionID: 'skill-session' } } });
+    const lifecycleSkillOutput = { system: [skillPrompt] };
+    await lifecycleSkillHook['experimental.chat.system.transform']({ sessionID: 'skill-session' }, lifecycleSkillOutput);
+    assert(lifecycleSkillOutput.system.join('\n').includes('frontend skill'), 'skill lifecycle: allowed skill survives session.created');
+    assert(!lifecycleSkillOutput.system.join('\n').includes('backend skill'), 'skill lifecycle: denied skill removed');
+
+    const lifecycleFallbackWorktree = join(tmpdir(), `step4-fallback-lifecycle-${Date.now()}`);
+    mkdirSync(lifecycleFallbackWorktree, { recursive: true });
+    const lifecycleAgents = createAgents({
+        agents: { frontend: { model: ['model-a', 'model-b'] } },
+        fallback: { chains: { frontend: ['model-a', 'model-b'] } },
+    });
+    const lifecycleAgentMap = Object.fromEntries(lifecycleAgents.map((agent) => [agent.name, agent]));
+    const lifecycleFallbackController = createForegroundFallbackController(lifecycleFallbackWorktree, true);
+    const lifecycleFallbackHook = createForegroundFallbackHook({ worktree: lifecycleFallbackWorktree, agentsByName: lifecycleAgentMap as any, fallbackEnabled: true, client: {} as any } as any, lifecycleFallbackController);
+    await lifecycleFallbackHook['chat.params']({ sessionID: 'fallback-session', agent: 'frontend' });
+    await lifecycleFallbackHook.event({ event: { type: 'session.created', properties: { sessionID: 'fallback-session' } } });
+    await lifecycleFallbackHook.event({ event: { type: 'session.error', properties: { sessionID: 'fallback-session', error: new Error('rate limit exceeded') } } });
+    assert(lifecycleFallbackController.resolveModel('frontend', 'model-a', ['model-a', 'model-b']) === 'model-b', 'fallback lifecycle: session.created does not clear state');
+    rmSync(join(HARNESS_DIR, 'projects', lifecycleFallbackController.projectKey), { recursive: true, force: true });
+    rmSync(lifecycleFallbackWorktree, { recursive: true, force: true });
 
     // ============================================================
     // 6. Subagent Depth Tracker Tests

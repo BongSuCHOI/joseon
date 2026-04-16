@@ -9,7 +9,7 @@ import { mergeEventHandlers, parseList } from './shared/index.js';
 import { createAgents } from './agents/agents.js';
 import type { AgentDefinition } from './agents/agents.js';
 import { loadConfig } from './config/index.js';
-import { createAllHooks } from './hooks/index.js';
+import { createAllHooks, createForegroundFallbackController } from './hooks/index.js';
 
 function buildToolPermissions(denyTools: string[] | undefined): Record<string, string> {
     const permissions: Record<string, string> = {};
@@ -54,11 +54,24 @@ export default {
   server: async (input: { project: unknown; client: unknown; $: unknown; directory: string; worktree: string }) => {
     const ctx = { worktree: input.worktree };
     const harnessConfig = loadConfig(input.worktree || input.directory || process.cwd());
+    const agents = createAgents(harnessConfig);
+    const agentsByName = Object.fromEntries(agents.map((agent) => [agent.name, agent])) as Record<string, AgentDefinition>;
+    const fallbackEnabled = harnessConfig?.fallback?.enabled ?? true;
+    const foregroundFallback = createForegroundFallbackController(input.worktree, fallbackEnabled);
+    const sessionAgents = new Map<string, string>();
     const observerHooks = await HarnessObserver(ctx);
     const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);
     const improverHooks = await HarnessImprover(ctx, harnessConfig);
     const orchestratorHooks = await HarnessOrchestrator(ctx);
-    const extraHooks = createAllHooks();
+    const extraHooks = createAllHooks({
+      worktree: input.worktree,
+      harnessConfig,
+      agentsByName,
+      foregroundFallback,
+      sessionAgents,
+      fallbackEnabled,
+      client: input.client,
+    });
 
     const allHooks = [observerHooks, enforcerHooks, improverHooks, orchestratorHooks, extraHooks];
     const merged = mergeEventHandlers(...allHooks);
@@ -69,7 +82,6 @@ export default {
     }
 
     (result as Record<string, unknown>).config = async (opencodeConfig: Record<string, unknown>) => {
-      const agents = createAgents(harnessConfig);
       const agentOverrides = harnessConfig?.agents ?? {};
 
       const allMcpNames = extractKnownMcpNames(opencodeConfig);
