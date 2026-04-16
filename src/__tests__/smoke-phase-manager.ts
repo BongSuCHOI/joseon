@@ -1,10 +1,11 @@
 // src/__tests__/smoke-phase-manager.ts — Phase Manager 스모크 테스트
 // 실행: npx tsx src/__tests__/smoke-phase-manager.ts
 
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { getPhaseState, transitionPhase, resetPhase } from '../orchestrator/phase-manager.js';
+import { HARNESS_DIR, getProjectKey } from '../shared/index.js';
 
 let passed = 0;
 let failed = 0;
@@ -19,13 +20,25 @@ function assert(condition: boolean, msg: string): void {
     }
 }
 
+function readJsonl(filePath: string): Array<Record<string, unknown>> {
+    if (!existsSync(filePath)) return [];
+    return readFileSync(filePath, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 // 임시 worktree 생성
 const testDir = join(tmpdir(), `phase-test-${Date.now()}`);
 const opencodeDir = join(testDir, '.opencode');
 const docsDir = join(testDir, 'docs');
+let projectKey = '';
+let shadowPath = '';
 
 mkdirSync(opencodeDir, { recursive: true });
 mkdirSync(docsDir, { recursive: true });
+projectKey = getProjectKey(testDir);
+shadowPath = join(HARNESS_DIR, 'projects', projectKey, 'phase-signal-shadow.jsonl');
 
 try {
     console.log('\n=== Phase Manager Smoke Tests ===\n');
@@ -50,6 +63,8 @@ try {
     assert(phase2Entry !== undefined, 'Phase 2 entry exists in history');
     assert(phase2Entry!.entered_at !== undefined, 'Phase 2 has entered_at');
     assert(phase2Entry!.completed_at === undefined, 'Phase 2 has no completed_at (current)');
+    let phaseShadowRecords = readJsonl(shadowPath);
+    assert(phaseShadowRecords.some((record) => record.kind === 'phase' && (record.deterministic as { phase_to?: number }).phase_to === 2 && (record.context as { transition_status?: string } | undefined)?.transition_status === 'applied'), 'successful phase transition is logged as applied');
 
     // 3. 동일 Phase 전환은 no-op
     console.log('\n[3] 동일 Phase 전환 (no-op)');
@@ -66,6 +81,8 @@ try {
         blocked = (err as Error).message.includes('[ORCHESTRATOR BLOCK]');
     }
     assert(blocked, 'Phase 3 blocked without qa-test-plan.md');
+    phaseShadowRecords = readJsonl(shadowPath);
+    assert(phaseShadowRecords.some((record) => record.kind === 'phase' && (record.deterministic as { phase_to?: number }).phase_to === 3 && (record.context as { transition_status?: string; reason?: string } | undefined)?.transition_status === 'blocked'), 'blocked phase transition is logged separately');
 
     // 5. Phase 2.5 gate — qa-test-plan.md 있으면 통과
     console.log('\n[5] Phase 2.5 gate — 통과');
@@ -73,6 +90,8 @@ try {
     const state5 = transitionPhase(testDir, 3);
     assert(state5.current_phase === 3, 'current_phase === 3');
     assert(state5.qa_test_plan_exists === true, 'qa_test_plan_exists === true');
+    phaseShadowRecords = readJsonl(shadowPath);
+    assert(phaseShadowRecords.some((record) => record.kind === 'phase' && (record.deterministic as { phase_to?: number }).phase_to === 3 && (record.context as { transition_status?: string } | undefined)?.transition_status === 'applied'), 'successful phase transition remains distinct from blocked attempt');
 
     // 6. 미완료 Phase 감지
     console.log('\n[6] 미완료 Phase 감지');

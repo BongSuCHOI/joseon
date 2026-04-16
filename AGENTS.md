@@ -115,15 +115,16 @@ Orchestrator (최상위, 기본 에이전트)
 ### Step 4 이후 고도화 (시기 미정)
 
 - 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
+- Step 5a 기준: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그와 default-off guard까지 구현·검증됨. 본 경로 롤아웃은 아직 아님.
 
 | 항목 | 상태 / 전략 | 요약 |
 |------|-------------|------|
 | 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | 계획 — shadow | Sync/Index/Search 위에 데이터가 쌓이면 상위 4단계를 순차 승격. |
 | 규칙 자동 삭제 (Pruning) | 계획 — guarded | 측정은 유지하고, 삭제는 충분한 데이터와 낮은 오탐 위험이 확인될 때만. |
 | Compacting 의미 기반 규칙 필터링 | 계획 — default-off shadow | 기존 compacting은 유지, 관련성 필터는 토큰 압박과 노이즈가 확인되면 도입. |
-| LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | 계획 — shadow | deterministic 기준을 그대로 두고, LLM은 비교용 판정자로 먼저 붙인다. |
-| fix: diff 기반 실수 패턴 학습 | 계획 — guarded-shadow | fix_commit 경로는 유지하고, diff 의미 요약만 별도로 축적한 뒤 승격. |
-| Ack 조건 강화 | 계획 — guarded | file-write ack를 유지하면서 harness-eval/acceptance 조건을 단계적으로 추가. |
+| LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | shadow | deterministic baseline 유지 + phase/signal 그림자 로깅. |
+| fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로는 유지하고, mistake_summary 그림자 로깅만 축적. |
+| Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |
 | Cross-Project 자동 승격 | 계획 — guarded-off | 다중 프로젝트 근거가 쌓이기 전까지는 수동 `global` 우선. |
 | Hooks — auto-update-checker | 계획 — default-off | npm 배포 이후에만 세션 시작 시 버전 확인, 기본은 비활성. |
 <!--

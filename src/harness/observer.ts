@@ -1,9 +1,10 @@
 // src/harness/observer.ts — Plugin 1: L1 관측 + L2 신호 변환
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId, logger } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId, logger, appendJsonlRecord } from '../shared/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import { SubagentDepthTracker } from '../orchestrator/subagent-depth.js';
+import type { Signal, ShadowDecisionRecord } from '../types.js';
 
 function emitSignal(signal: Record<string, unknown>): void {
     const id = generateId();
@@ -11,6 +12,41 @@ function emitSignal(signal: Record<string, unknown>): void {
         join(HARNESS_DIR, 'signals/pending', `${id}.json`),
         JSON.stringify({ id, status: 'pending', timestamp: new Date().toISOString(), ...signal }, null, 2),
     );
+}
+
+function phaseSignalShadowPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'phase-signal-shadow.jsonl');
+}
+
+function appendSignalShadowRecord(
+    projectKey: string,
+    signalType: Signal['type'],
+    emitted: boolean,
+    trigger: string,
+    context: Record<string, unknown>,
+    sessionID?: string,
+): void {
+    const record: ShadowDecisionRecord = {
+        id: generateId(),
+        kind: 'signal',
+        project_key: projectKey,
+        session_id: sessionID,
+        timestamp: new Date().toISOString(),
+        deterministic: {
+            trigger,
+            signal_type: signalType,
+            emitted,
+        },
+        shadow: {
+            status: 'unavailable',
+            signal_relevance: 'unknown',
+            confidence: 0,
+            reason: 'llm_unavailable',
+        },
+        context,
+    };
+
+    appendJsonlRecord(phaseSignalShadowPath(projectKey), record as unknown as Record<string, unknown>);
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -133,7 +169,14 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                     repeat_count: count,
                 });
 
-                if (count >= 3) {
+                const sessionID = (event.properties as { sessionID?: string })?.sessionID;
+                const shouldEmit = count >= 3;
+                appendSignalShadowRecord(projectKey, 'error_repeat', shouldEmit, 'session.error', {
+                    error: errorInfo,
+                    repeat_count: count,
+                }, sessionID);
+
+                if (shouldEmit) {
                     emitSignal({
                         type: 'error_repeat',
                         project_key: getProjectKey(ctx.worktree),
@@ -160,7 +203,13 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                     if (typeof content === 'string') {
                         const frustrationKeywords = ['왜이래', '안돼', '또', '이상해', '다시', '안되잖아', '장난해', '에러', '버그', '깨졌어', '제대로'];
                         const found = frustrationKeywords.filter((kw) => content.includes(kw));
-                        if (found.length > 0) {
+                        const shouldEmit = found.length > 0;
+                        appendSignalShadowRecord(projectKey, 'user_feedback', shouldEmit, 'message.part.updated', {
+                            matched_keywords: found,
+                            message_id: part.messageID,
+                        });
+
+                        if (shouldEmit) {
                             emitSignal({
                                 type: 'user_feedback',
                                 project_key: getProjectKey(ctx.worktree),

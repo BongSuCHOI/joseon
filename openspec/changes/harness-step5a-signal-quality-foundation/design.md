@@ -41,6 +41,12 @@ phase와 signal은 현재 결정적 기준이 기준선이다. 이번 변경은 
 3. mismatch가 충분히 안정적일 때만 ack 강화 가드를 연다.
 4. 실패 시 기존 written ack 경로로 즉시 되돌린다.
 
+## Rollback Criteria
+
+- `npm run build` 또는 Step 5a smoke 테스트가 실패하면 accepted ack 기록은 사용하지 않고 기존 written ack만 유지한다.
+- deterministic phase 파일이나 pending/ack signal 파일 스키마가 shadow 필드로 오염되면 shadow 로그 파일만 제거하고 baseline 경로를 우선 복구한다.
+- shadow 로그 증가가 과도하거나 `mistake_summary` 품질이 낮으면 `phase-signal-shadow.jsonl`, `mistake-pattern-shadow.jsonl`, `ack-status.jsonl`만 롤백 대상으로 보고 rule promotion과 baseline signal 흐름은 건드리지 않는다.
+
 ## Open Questions
 
 - phase shadow와 signal shadow를 같은 파일에 둘지 분리할지

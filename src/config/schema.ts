@@ -30,6 +30,7 @@ export interface HarnessSettings {
     scaffold_match_ratio?: number;
     search_max_results?: number;
     max_subagent_depth?: number;
+    ack_guard_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -47,6 +48,7 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     scaffold_match_ratio: 0.6,
     search_max_results: 10,
     max_subagent_depth: 3,
+    ack_guard_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

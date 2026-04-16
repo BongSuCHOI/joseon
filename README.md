@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (stability follow-up 포함, 통합 테스트 248/248 통과) |
+| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (stability follow-up 포함, 통합 테스트 248/248 통과). Step 5a foundation도 구현/검증 완료 |
 
 ### 핵심 원칙
 
@@ -126,6 +126,9 @@ SOFT 규칙 생성 (rules/soft/)
 ├── projects/
 │   ├── {key}/
 │   │   ├── state.json               # 프로젝트 상태
+│   │   ├── phase-signal-shadow.jsonl # phase/signal 그림자 로그
+│   │   ├── mistake-pattern-shadow.jsonl # diff 실수 요약 그림자 로그
+│   │   ├── ack-status.jsonl          # written/accepted ack 상태 로그
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   └── ...

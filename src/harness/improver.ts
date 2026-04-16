@@ -5,8 +5,8 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
-import type { Signal, Rule, ProjectState } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource } from '../shared/index.js';
+import type { Signal, Rule, ProjectState, MistakeSummaryShadowRecord, AckRecord } from '../types.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 
@@ -68,6 +68,114 @@ function loadJsonFiles<T>(dir: string): T[] {
         } catch { /* 파싱 실패한 파일은 무시 */ }
     }
     return items;
+}
+
+function getMistakeShadowPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'mistake-pattern-shadow.jsonl');
+}
+
+function getAckStatusPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'ack-status.jsonl');
+}
+
+const GIT_HASH_REGEX = /^[a-f0-9]{7,64}$/i;
+
+function isValidGitHash(hash: string): boolean {
+    return GIT_HASH_REGEX.test(hash);
+}
+
+export function buildMistakeSummary(message: string, files: string[], diffText: string): { mistake_summary: string; ambiguous: boolean } {
+    const diffLines = diffText.split('\n');
+    const tooLarge = diffText.length > 12000 || diffLines.length > 400;
+    const fileLabel = files.slice(0, 3).join(', ') || 'unknown-files';
+    const addedLines = diffLines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+    const removedLines = diffLines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+    const hasChanges = addedLines + removedLines > 0;
+
+    if (!hasChanges || tooLarge) {
+        return {
+            mistake_summary: `Ambiguous fix diff shadow: ${message}; files=${fileLabel}; diff_summary=redacted; added_lines=${addedLines}; removed_lines=${removedLines}`,
+            ambiguous: true,
+        };
+    }
+
+    return {
+        mistake_summary: `Fix diff shadow: ${message}; files=${fileLabel}; added_lines=${addedLines}; removed_lines=${removedLines}`,
+        ambiguous: false,
+    };
+}
+
+function readMistakeSummaryShadowRecords(projectKey: string): MistakeSummaryShadowRecord[] {
+    const filePath = getMistakeShadowPath(projectKey);
+    if (!existsSync(filePath)) return [];
+
+    try {
+        return readFileSync(filePath, 'utf-8')
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as MistakeSummaryShadowRecord);
+    } catch {
+        return [];
+    }
+}
+
+export function appendMistakeSummaryShadow(projectKey: string, hash: string, message: string, files: string[], diffText: string): MistakeSummaryShadowRecord {
+    const normalizedHash = hash.toLowerCase();
+    const existing = readMistakeSummaryShadowRecords(projectKey).find((record) => record.commit_hash.toLowerCase() === normalizedHash);
+    if (existing) {
+        return existing;
+    }
+
+    const summary = buildMistakeSummary(message, files, diffText);
+    const record: MistakeSummaryShadowRecord = {
+        id: generateId(),
+        project_key: projectKey,
+        timestamp: new Date().toISOString(),
+        commit_hash: normalizedHash,
+        commit_message: message,
+        affected_files: files,
+        mistake_summary: summary.mistake_summary,
+        ambiguous: summary.ambiguous,
+    };
+
+    appendJsonlRecord(getMistakeShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    return record;
+}
+
+function readFixDiff(worktree: string, hash: string): string {
+    if (!isValidGitHash(hash)) return '';
+
+    try {
+        return execSync(`git show --format= --unified=1 --stat=0 ${hash}`, {
+            cwd: worktree,
+            encoding: 'utf-8',
+            timeout: 5000,
+        });
+    } catch {
+        return '';
+    }
+}
+
+function appendAckRecord(projectKey: string, record: AckRecord): void {
+    appendJsonlRecord(getAckStatusPath(projectKey), record as unknown as Record<string, unknown>);
+}
+
+export function evaluateAckAcceptance(signal: Signal, ackPath: string): { accepted: boolean; reason: string; acceptance_check: 'rule_written' } {
+    if (!existsSync(ackPath)) {
+        return { accepted: false, reason: 'written_ack_missing', acceptance_check: 'rule_written' };
+    }
+
+    const pattern = signal.payload.pattern || signal.payload.description;
+    if (!pattern) {
+        return { accepted: false, reason: 'missing_signal_pattern', acceptance_check: 'rule_written' };
+    }
+
+    const normalizedPattern = signal.type === 'fix_commit' ? escapeRegexLiteral(pattern) : pattern;
+    if (!ruleExists(normalizedPattern, signal.project_key)) {
+        return { accepted: false, reason: 'rule_not_persisted', acceptance_check: 'rule_written' };
+    }
+
+    return { accepted: true, reason: 'rule_persisted', acceptance_check: 'rule_written' };
 }
 
 export function buildFixCommitSignalPayload(message: string, hash: string, files: string[]): Record<string, unknown> {
@@ -395,9 +503,17 @@ function detectFixCommits(worktree: string, projectKey: string): void {
         const hash = lines[0].trim();
         const message = lines[1].trim();
         if (!hash || !message.startsWith('fix')) continue;
+        if (!isValidGitHash(hash)) continue;
+
+        const normalizedHash = hash.toLowerCase();
+        if (readMistakeSummaryShadowRecords(projectKey).some((record) => record.commit_hash.toLowerCase() === normalizedHash)) {
+            continue;
+        }
 
         // 3번째 줄부터 파일 목록
         const files = lines.slice(2).filter((l) => l.trim().length > 0);
+
+        appendMistakeSummaryShadow(projectKey, normalizedHash, message, files, readFixDiff(worktree, hash));
 
         // fix_commit signal 생성 (message-based contract 유지)
         const signal: Record<string, unknown> = {
@@ -638,7 +754,38 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                         signalToRule(signal, ctx.worktree);
 
                         // signal을 ack로 이동 (idempotent: 재시도해도 안전)
-                        renameSync(filePath, join(ackDir, file));
+                        const ackPath = join(ackDir, file);
+                        renameSync(filePath, ackPath);
+
+                        const acceptance = settings.ack_guard_enabled
+                            ? evaluateAckAcceptance(signal, ackPath)
+                            : { accepted: false, reason: 'guard_disabled', acceptance_check: 'rule_written' as const };
+
+                        appendAckRecord(projectKey, {
+                            signal_id: signal.id,
+                            project_key: projectKey,
+                            timestamp: new Date().toISOString(),
+                            state: 'written',
+                            signal_type: signal.type,
+                            guard_enabled: settings.ack_guard_enabled,
+                            acceptance_check: acceptance.acceptance_check,
+                            accepted: acceptance.accepted,
+                            reason: acceptance.reason,
+                        });
+
+                        if (settings.ack_guard_enabled && acceptance.accepted) {
+                            appendAckRecord(projectKey, {
+                                signal_id: signal.id,
+                                project_key: projectKey,
+                                timestamp: new Date().toISOString(),
+                                state: 'accepted',
+                                signal_type: signal.type,
+                                guard_enabled: true,
+                                acceptance_check: acceptance.acceptance_check,
+                                accepted: true,
+                                reason: acceptance.reason,
+                            });
+                        }
                     } catch (err) {
                         logger.error('improver', 'failed to process signal', { file, error: err });
                     }

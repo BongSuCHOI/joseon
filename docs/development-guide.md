@@ -376,6 +376,11 @@ find ~/.config/opencode/harness/ -type f | sort
 # 오늘 도구 로그
 cat ~/.config/opencode/harness/logs/tools/$(date +%Y-%m-%d).jsonl
 
+# Step 5a 그림자/ack 로그
+cat ~/.config/opencode/harness/projects/*/phase-signal-shadow.jsonl
+cat ~/.config/opencode/harness/projects/*/mistake-pattern-shadow.jsonl
+cat ~/.config/opencode/harness/projects/*/ack-status.jsonl
+
 # 활성 규칙
 ls ~/.config/opencode/harness/rules/hard/
 ls ~/.config/opencode/harness/rules/soft/
@@ -481,3 +486,5 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-16 | fix_commit 패턴 추출 수정 | detectFixCommits에서 source_file을 패턴으로 사용 금지 | ✅ | "수정한 파일 = 수정 금지 파일" 논리적 오류 수정. pattern을 커밋 메시지로 변경, source_file을 빈 문자열로 설정 |
 | 2026-04-16 | fix_commit scope 수정 | mapSignalTypeToScope('fix_commit')을 'file' → 'tool'로 변경 | ✅ | 파일 경로 패턴 매칭으로 인한 설정 파일 차단 방지 |
 | 2026-04-16 | fix_commit 테스트 | smoke-test.ts에 5개 신규 테스트 | ✅ | 43/43 통과 (기존 38 + source_file 금지 5) |
+| 2026-04-16 | Step 5a | npm run build | ✅ | phase/signal shadow, mistake-summary shadow, ack-status guard 반영 |
+| 2026-04-16 | Step 5a | smoke test | ✅ | phase/signal 그림자 로그 + mistake-pattern 그림자 로그 + written/accepted ack 로그 확인, ack_guard_enabled 기본값 false |

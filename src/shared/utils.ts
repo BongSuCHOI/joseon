@@ -1,5 +1,5 @@
 import { mkdirSync, appendFileSync, realpathSync, statSync, renameSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { HARNESS_DIR } from './constants.js';
 import { logger } from './logger.js';
@@ -59,6 +59,11 @@ export function rotateHistoryIfNeeded(historyPath: string, maxBytes?: number): v
             renameSync(historyPath, join(dir, rotatedName));
         }
     } catch { /* 로테이션 실패는 치명적이지 않음 */ }
+}
+
+export function appendJsonlRecord(filePath: string, data: Record<string, unknown>): void {
+    mkdirSync(dirname(filePath), { recursive: true });
+    appendFileSync(filePath, JSON.stringify(data) + '\n');
 }
 
 export function parseList(items: string[], allAvailable: string[]): string[] {

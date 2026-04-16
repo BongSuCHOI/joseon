@@ -96,3 +96,50 @@ export interface EvalResult {
         timestamp: string;
     }>;
 }
+
+export interface ShadowDecisionRecord {
+    id: string;
+    kind: 'phase' | 'signal';
+    project_key: string;
+    session_id?: string;
+    timestamp: string;
+    deterministic: {
+        trigger: string;
+        phase_from?: number;
+        phase_to?: number;
+        signal_type?: Signal['type'];
+        emitted?: boolean;
+    };
+    shadow: {
+        status: 'recorded' | 'low_confidence' | 'unavailable';
+        phase_hint?: number;
+        signal_relevance?: 'relevant' | 'irrelevant' | 'unknown';
+        confidence: number;
+        reason?: string;
+        model?: string;
+    };
+    context?: Record<string, unknown>;
+}
+
+export interface MistakeSummaryShadowRecord {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    commit_hash: string;
+    commit_message: string;
+    affected_files: string[];
+    mistake_summary: string;
+    ambiguous: boolean;
+}
+
+export interface AckRecord {
+    signal_id: string;
+    project_key: string;
+    timestamp: string;
+    state: 'written' | 'accepted';
+    signal_type: Signal['type'];
+    guard_enabled: boolean;
+    acceptance_check: 'rule_written';
+    accepted: boolean;
+    reason: string;
+}

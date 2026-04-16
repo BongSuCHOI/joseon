@@ -1,7 +1,8 @@
 // src/orchestrator/phase-manager.ts — Phase 상태 파일 관리 + Phase 2.5 gate
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { PhaseState, PhaseHistoryEntry } from '../types.js';
+import type { PhaseState, PhaseHistoryEntry, ShadowDecisionRecord } from '../types.js';
+import { HARNESS_DIR, appendJsonlRecord, generateId, getProjectKey } from '../shared/index.js';
 
 const PHASE_FILE_NAME = 'orchestrator-phase.json';
 
@@ -15,6 +16,35 @@ function initialPhaseState(): PhaseState {
         phase_history: [],
         qa_test_plan_exists: false,
     };
+}
+
+function phaseSignalShadowPath(worktree: string): string {
+    return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'phase-signal-shadow.jsonl');
+}
+
+function appendPhaseShadowRecord(worktree: string, currentPhase: number, targetPhase: number, transitionStatus: 'blocked' | 'applied', reason?: string): void {
+    const record: ShadowDecisionRecord = {
+        id: generateId(),
+        kind: 'phase',
+        project_key: getProjectKey(worktree),
+        timestamp: new Date().toISOString(),
+        deterministic: {
+            trigger: 'transitionPhase',
+            phase_from: currentPhase,
+            phase_to: targetPhase,
+        },
+        shadow: {
+            status: 'unavailable',
+            confidence: 0,
+            reason: 'llm_unavailable',
+        },
+        context: {
+            transition_status: transitionStatus,
+            ...(reason ? { reason } : {}),
+        },
+    };
+
+    appendJsonlRecord(phaseSignalShadowPath(worktree), record as unknown as Record<string, unknown>);
 }
 
 /**
@@ -58,9 +88,10 @@ export function getPhaseState(worktree: string): PhaseState {
  */
 export function transitionPhase(worktree: string, targetPhase: number): PhaseState {
     const state = getPhaseState(worktree);
+    const previousPhase = state.current_phase;
 
     // 동일 Phase면 no-op
-    if (state.current_phase === targetPhase) {
+    if (previousPhase === targetPhase) {
         return state;
     }
 
@@ -68,6 +99,7 @@ export function transitionPhase(worktree: string, targetPhase: number): PhaseSta
     if (targetPhase === 3) {
         const qaPlanPath = join(worktree, 'docs', 'qa-test-plan.md');
         if (!existsSync(qaPlanPath)) {
+            appendPhaseShadowRecord(worktree, previousPhase, targetPhase, 'blocked', 'missing_qa_test_plan');
             throw new Error(
                 `[ORCHESTRATOR BLOCK] Phase 3 진입 불가: docs/qa-test-plan.md가 존재하지 않습니다. ` +
                 `Phase 2.5에서 QA 테스트 계획을 먼저 작성하세요.`
@@ -101,6 +133,8 @@ export function transitionPhase(worktree: string, targetPhase: number): PhaseSta
 
     // incomplete_phase 제거 (방금 새 Phase에 진입했으므로)
     delete state.incomplete_phase;
+
+    appendPhaseShadowRecord(worktree, previousPhase, targetPhase, 'applied');
 
     const filePath = phaseFilePath(worktree);
     writeFileSync(filePath, JSON.stringify(state, null, 2));
