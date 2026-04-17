@@ -52,12 +52,13 @@ function buildSkillPermissions(allowedSkills: string[] | undefined, allSkillName
 export default {
   id: "my-harness",
   server: async (input: { project: unknown; client: unknown; $: unknown; directory: string; worktree: string }) => {
-    const ctx = { worktree: input.worktree };
-    const harnessConfig = loadConfig(input.worktree || input.directory || process.cwd());
+    const worktree = input.worktree || input.directory || process.cwd();
+    const ctx = { worktree };
+    const harnessConfig = loadConfig(worktree);
     const agents = createAgents(harnessConfig);
     const agentsByName = Object.fromEntries(agents.map((agent) => [agent.name, agent])) as Record<string, AgentDefinition>;
     const fallbackEnabled = harnessConfig?.fallback?.enabled ?? true;
-    const foregroundFallback = createForegroundFallbackController(input.worktree, fallbackEnabled);
+    const foregroundFallback = createForegroundFallbackController(worktree, fallbackEnabled);
     const sessionAgents = new Map<string, string>();
     const observerHooks = await HarnessObserver(ctx);
     const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);

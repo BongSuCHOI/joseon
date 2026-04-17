@@ -40,7 +40,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 git clone <repo-url>
 cd harness-orchestration
 npm install
-npm run build
+npm run deploy
 ```
 
 ### OpenCode에 로컬 플러그인으로 등록
@@ -49,7 +49,7 @@ npm run build
 
 ```json
 {
-  "plugin": ["./.opencode/plugins/harness"]
+  "plugin": ["./.opencode/plugins/harness/index.js"]
 }
 ```
 
@@ -149,11 +149,8 @@ SOFT 규칙 생성 (rules/soft/)
 ## 개발
 
 ```bash
-# 빌드
-npm run build
-
-# 소스 수정 후 로컬 플러그인에 동기화
-rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
+# 빌드 + 로컬 플러그인 동기화
+npm run deploy
 ```
 
 ### reduced-safe Step 5b 설정
@@ -164,6 +161,18 @@ rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
 {
   "harness": {
     "semantic_compacting_enabled": false
+  }
+}
+```
+
+### Step 5d release ops 설정
+
+`auto_update_checker_enabled`는 기본값이 `false`다. 켜면 세션 시작(`session.created`)에서만 레지스트리 버전을 확인하고, 실패는 무시한다. 알림은 warn-only이며 전역 쿨다운 상태는 `~/.config/opencode/harness/projects/global/auto-update-checker.json`에 저장된다.
+
+```jsonc
+{
+  "harness": {
+    "auto_update_checker_enabled": false
   }
 }
 ```
@@ -188,6 +197,7 @@ src/
 │   ├── phase-reminder.ts         # orchestrator 워크플로우 리마인더
 │   ├── foreground-fallback.ts    # abort + prompt_async 재프롬프트로 same-session 복구
 │   ├── filter-available-skills.ts # 에이전트별 스킬 노출 필터
+│   ├── auto-update-checker.ts    # default-off warn-only release ops checker
 │   └── index.ts                  # createAllHooks() + 핸들러 병합
 ├── shared/
 │   ├── constants.ts             # HARNESS_DIR 경로 상수
@@ -327,7 +337,7 @@ npm run build
 
 ```bash
 npm run deploy
-# 또는 수동: rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
+# 또는 수동: npm run build && rsync -av --delete dist/ .opencode/plugins/harness/
 ```
 
 ### 5. OpenCode 실행

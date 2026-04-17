@@ -86,6 +86,23 @@ function releaseSessionLock(projectKey: string): void {
     } catch { /* 정리 실패는 치명적이지 않음 */ }
 }
 
+function persistSessionStart(projectKey: string, sessionID: string): void {
+    const sessionStartPath = join(HARNESS_DIR, 'logs/sessions', `session_start_${projectKey}.json`);
+    if (existsSync(sessionStartPath)) {
+        try {
+            const current = JSON.parse(readFileSync(sessionStartPath, 'utf-8')) as { sessionID?: string };
+            if (current?.sessionID === sessionID) return;
+        } catch {
+            // overwrite malformed file
+        }
+    }
+
+    writeFileSync(
+        sessionStartPath,
+        JSON.stringify({ timestamp: new Date().toISOString(), sessionID }, null, 2),
+    );
+}
+
 function isUserInterrupt(err: unknown): boolean {
     if (!err) return false;
     const s = String(err).toLowerCase();
@@ -125,11 +142,15 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
         event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
             if (event.type === 'session.created') {
                 const sessionID = (event.properties as { sessionID?: string })?.sessionID || 'unknown';
-                writeFileSync(
-                    join(HARNESS_DIR, 'logs/sessions', `session_start_${projectKey}.json`),
-                    JSON.stringify({ timestamp: new Date().toISOString(), sessionID }, null, 2),
-                );
+                persistSessionStart(projectKey, sessionID);
                 acquireSessionLock(projectKey);
+            }
+
+            if (event.type === 'session.updated') {
+                const sessionID = (event.properties as { sessionID?: string })?.sessionID;
+                if (sessionID) {
+                    persistSessionStart(projectKey, sessionID);
+                }
             }
 
             if (event.type === 'subagent.session.created') {

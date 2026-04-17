@@ -131,7 +131,7 @@ Orchestrator (최상위, 기본 에이전트)
 | fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로는 유지하고, mistake_summary 그림자 로깅만 축적. |
 | Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |
 | Cross-Project 자동 승격 | guarded-off | Step 5c로 `cross-project-promotion-candidates.jsonl` exact-match 후보 기록. 수동 `global` 우선 유지. |
-| Hooks — auto-update-checker | 계획 — default-off | npm 배포 이후에만 세션 시작 시 버전 확인, 기본은 비활성. |
+| Hooks — auto-update-checker | 완료 — default-off warn-only | npm 배포 후 `session.created`에서만 버전 확인, 전역 24h 쿨다운 상태 파일 사용. |
 <!--
 | fix: diff 기반 실수 패턴 학습 | LLM 기반 signal 판정(#B)과 함께. fix 커밋의 diff에서 "왜 고쳤는가"를 추출하여 의미 있는 규칙 패턴 생성. 현재는 source_file(파일 경로)을 패턴으로 사용하는데, 이는 논리적 오류(수정한 파일 = 수정 금지 파일). diff 분석은 단순 패턴 매칭으로 한계가 있으므로 LLM 필요 |
 | Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |

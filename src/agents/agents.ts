@@ -1,8 +1,11 @@
 // src/agents/agents.ts — agent registration logic
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { HarnessConfig, AgentOverrideConfig, FallbackConfig } from '../config/index.js';
 import { logger } from '../shared/logger.js';
+
+const moduleDir = dirname(fileURLToPath(import.meta.url));
 
 export interface AgentDefinition {
     name: string;
@@ -22,7 +25,7 @@ export interface AgentDefinition {
 }
 
 function loadPrompt(filename: string): string {
-    const promptPath = join(__dirname, 'prompts', filename);
+    const promptPath = join(moduleDir, 'prompts', filename);
     return readFileSync(promptPath, 'utf-8');
 }
 

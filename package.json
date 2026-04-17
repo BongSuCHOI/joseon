@@ -2,11 +2,12 @@
   "name": "my-harness",
   "version": "0.1.0",
   "description": "OpenCode plugin-based harness + orchestration system",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && cp -R src/agents/prompts dist/agents/prompts",
-    "deploy": "rsync -av --delete --exclude='__tests__' src/ .opencode/plugins/harness/",
+    "build": "tsc && cp -R src/agents/prompts dist/agents/prompts && node -e \"const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));fs.writeFileSync('dist/package.json', JSON.stringify({name:pkg.name,version:pkg.version,type:'module',main:'./index.js'}, null, 2)+'\\n');\"",
+    "deploy": "npm run build && rsync -av --delete --exclude='__tests__' dist/ .opencode/plugins/harness/",
     "dev": "tsc --watch"
   },
   "devDependencies": {

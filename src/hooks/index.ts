@@ -2,6 +2,7 @@ import { createDelegateTaskRetryHook } from './delegate-task-retry.js';
 import { createJsonErrorRecoveryHook } from './json-error-recovery.js';
 import { createFilterAvailableSkillsHook } from './filter-available-skills.js';
 import { createForegroundFallbackController, createForegroundFallbackHook } from './foreground-fallback.js';
+import { createAutoUpdateCheckerHook } from './auto-update-checker.js';
 import { createPostFileToolNudgeHook } from './post-file-tool-nudge.js';
 import { createPostReadNudgeHook } from './post-read-nudge.js';
 import { createPhaseReminderHook } from './phase-reminder.js';
@@ -28,6 +29,7 @@ export function createAllHooks(context: HookContext): Record<string, (...args: u
         createPostFileToolNudgeHook(),
         createPostReadNudgeHook(),
         createPhaseReminderHook(),
+        createAutoUpdateCheckerHook({ harnessConfig: context.harnessConfig }),
         createFilterAvailableSkillsHook({ harnessConfig: context.harnessConfig, sessionAgents: context.sessionAgents }),
         createForegroundFallbackHook({ worktree: context.worktree, agentsByName: context.agentsByName, fallbackEnabled: context.fallbackEnabled, client: context.client }, context.foregroundFallback),
     ];

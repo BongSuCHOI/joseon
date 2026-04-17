@@ -34,6 +34,7 @@ export interface HarnessSettings {
     semantic_compacting_enabled?: boolean;
     prune_guard_enabled?: boolean;
     cross_project_promotion_guard_enabled?: boolean;
+    auto_update_checker_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -55,6 +56,7 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     semantic_compacting_enabled: false,
     prune_guard_enabled: false,
     cross_project_promotion_guard_enabled: false,
+    auto_update_checker_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

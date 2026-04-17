@@ -8,54 +8,56 @@
 
 ### 개발 중: 로컬 플러그인
 
-`.opencode/plugins/` 디렉토리에 TypeScript 파일을 직접 배치. Bun 런타임이 컴파일 없이 실행.
+`.opencode/plugins/` 디렉토리에는 **빌드된 ESM 산출물**을 배치한다. 소스 수정은 계속 `src/`에서 하고, OpenCode는 로컬 플러그인 디렉토리의 `index.js`를 로드한다.
 
 ```
 .opencode/plugins/harness/
-├── package.json          # { "name": "my-harness", "type": "module" }
-├── index.ts              # export default { id, server() }
-├── types.ts
+├── package.json          # { "name": "my-harness", "version": "...", "type": "module", "main": "./index.js" }
+├── index.js              # build 결과물 (ESM)
+├── types.js
 ├── shared/
-│   ├── constants.ts
-│   ├── utils.ts          # getProjectKey, ensureHarnessDirs, logEvent, generateId, mergeEventHandlers
-│   ├── logger.ts         # 구조화된 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
-│   └── index.ts
+│   ├── constants.js
+│   ├── utils.js          # getProjectKey, ensureHarnessDirs, logEvent, generateId, mergeEventHandlers
+│   ├── logger.js         # 구조화된 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
+│   └── index.js
 ├── config/               # A2: 설정 시스템
-│   ├── schema.ts         # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
-│   ├── loader.ts         # JSONC/JSON 로더 + 글로벌/프로젝트 병합
-│   └── index.ts
+│   ├── schema.js         # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
+│   ├── loader.js         # JSONC/JSON 로더 + 글로벌/프로젝트 병합
+│   └── index.js
 ├── hooks/                # A3: 훅 모듈
-│   ├── delegate-task-retry.ts
-│   ├── json-error-recovery.ts
-│   ├── post-file-tool-nudge.ts
-│   ├── post-read-nudge.ts
-│   ├── phase-reminder.ts
-│   ├── foreground-fallback.ts   # abort + prompt_async 재프롬프트로 same-session 복구
-│   ├── filter-available-skills.ts
-│   └── index.ts          # createAllHooks()
+│   ├── delegate-task-retry.js
+│   ├── json-error-recovery.js
+│   ├── post-file-tool-nudge.js
+│   ├── post-read-nudge.js
+│   ├── phase-reminder.js
+│   ├── foreground-fallback.js   # abort + prompt_async 재프롬프트로 same-session 복구
+│   ├── filter-available-skills.js
+│   ├── auto-update-checker.js    # session.created 전용 warn-only checker, global cooldown
+│   └── index.js          # createAllHooks()
 ├── harness/
-│   ├── observer.ts
-│   ├── enforcer.ts
-│   └── improver.ts       # Step 2 추가: L5 자가개선 + L6 폐루프
+│   ├── observer.js
+│   ├── enforcer.js
+│   └── improver.js       # Step 2 추가: L5 자가개선 + L6 폐루프
 ├── orchestrator/
-│   ├── orchestrator.ts
-│   ├── phase-manager.ts
-│   ├── error-recovery.ts
-│   ├── qa-tracker.ts
-│   └── subagent-depth.ts
+│   ├── orchestrator.js
+│   ├── phase-manager.js
+│   ├── error-recovery.js
+│   ├── qa-tracker.js
+│   └── subagent-depth.js
 └── agents/               # 10개 에이전트
-    ├── agents.ts
+    ├── agents.js
     └── prompts/
 ```
 
 **설정 파일:**
 - 프로젝트: `.opencode/harness.jsonc` — 에이전트 model/temperature/hidden + 하네스 임계값 오버라이드
 - 글로벌: `~/.config/opencode/harness.jsonc` — 모든 프로젝트에 적용 (프로젝트 설정이 우선)
+- Step 5d: `auto_update_checker_enabled` 기본값은 `false`, 전역 상태 파일은 `~/.config/opencode/harness/projects/global/auto-update-checker.json`
 
 **핵심 규칙:**
 - `package.json`에 `"type": "module"` 필수
-- `index.ts`는 `export default { id, server() }` 패턴 사용
-- `src/`의 소스를 복사해서 사용 (import 경로에 `.js` 확장자 필수 — Bun이 처리)
+- `src/index.ts`는 `export default { id, server() }` 패턴 사용
+- 로컬 플러그인 디렉토리에는 `dist/` 빌드 결과물과 배포용 `package.json`이 들어가야 함
 - OpenCode 재시작 시 자동 로드됨
 
 ### 실사용/배포: npm 패키지
@@ -83,20 +85,21 @@ npm publish      # npm 레지스트리에 배포
 ### src/ 수정 후 로컬 플러그인에 반영
 
 ```bash
-# 1. src/에서 수정 후 빌드
-npm run build
+# 1. src/에서 수정 후 빌드 + 로컬 플러그인 동기화
+npm run deploy
 
-# 2. 전체 src/를 로컬 플러그인에 동기화
-rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
-
-# 3. OpenCode 재시작
+# 2. OpenCode 재시작
 ```
 
 ### 빠른 동기화 스크립트
 
 ```bash
-# src/ 변경사항을 로컬 플러그인에 싱크 (__tests__만 제외)
-rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
+# build 결과물을 로컬 플러그인에 싱크
+npm run deploy
+
+# 또는 수동
+npm run build
+rsync -av --delete dist/ .opencode/plugins/harness/
 ```
 
 OpenCode는 TUI 앱이므로 tmux를 사용해서 자동화 테스트를 실행한다.
@@ -496,3 +499,8 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-17 | Step 5c | npm run build | ✅ | prune candidate / cross-project candidate 경로 반영 |
 | 2026-04-17 | Step 5c | unit-step5c-rule-lifecycle | ✅ | pruning matrix + cross-project exact-match aggregation + guarded-off global write 확인 |
 | 2026-04-17 | Step 5c | smoke-step5c-rule-lifecycle | ✅ | session.idle 기반 rule lifecycle smoke 통과 |
+| 2026-04-17 | Step 5d | npm run build | ✅ | default-off warn-only auto-update checker + 전역 24h 쿨다운 반영 |
+| 2026-04-17 | Step 5d | unit-step5d-release-ops | ✅ | default-off / enabled / cooldown / failure / same-version 경로 확인 |
+| 2026-04-17 | Step 5d | smoke-step5d-release-ops | ✅ | `session.created` 전용 트리거 + subagent 제외 + live registry query 비차단 확인 |
+| 2026-04-17 | Step 5d | Step 5a/5b regression | ✅ | 기존 shadow/default-off 경로 회귀 없음 |
+| 2026-04-17 | Step 5d | tmux 실세션 sanity | ⚠️ | TUI 세션 시작은 정상. 이 환경에서는 `session.created` side effect 미관측으로 상태 파일 생성은 확인되지 않아, hook-path 검증은 smoke를 기준으로 삼음 |
