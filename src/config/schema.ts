@@ -32,6 +32,8 @@ export interface HarnessSettings {
     max_subagent_depth?: number;
     ack_guard_enabled?: boolean;
     semantic_compacting_enabled?: boolean;
+    prune_guard_enabled?: boolean;
+    cross_project_promotion_guard_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -51,6 +53,8 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     max_subagent_depth: 3,
     ack_guard_enabled: false,
     semantic_compacting_enabled: false,
+    prune_guard_enabled: false,
+    cross_project_promotion_guard_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

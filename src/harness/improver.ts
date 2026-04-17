@@ -14,6 +14,8 @@ import type {
     MemoryFact,
     UpperMemoryExtractShadowRecord,
     CompactionRelevanceShadowRecord,
+    RulePruneCandidateRecord,
+    CrossProjectPromotionCandidateRecord,
 } from '../types.js';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
@@ -79,6 +81,19 @@ function loadJsonFiles<T>(dir: string): T[] {
     return items;
 }
 
+function loadJsonlRecords<T>(filePath: string): T[] {
+    if (!existsSync(filePath)) return [];
+
+    try {
+        return readFileSync(filePath, 'utf-8')
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as T);
+    } catch {
+        return [];
+    }
+}
+
 function getMistakeShadowPath(projectKey: string): string {
     return join(HARNESS_DIR, 'projects', projectKey, 'mistake-pattern-shadow.jsonl');
 }
@@ -93,6 +108,14 @@ function getUpperMemoryShadowPath(projectKey: string): string {
 
 function getCompactionShadowPath(projectKey: string): string {
     return join(HARNESS_DIR, 'projects', projectKey, 'compacting-relevance-shadow.jsonl');
+}
+
+function getRulePruneCandidatePath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'rule-prune-candidates.jsonl');
+}
+
+function getCrossProjectPromotionCandidatePath(): string {
+    return join(HARNESS_DIR, 'projects', 'global', 'cross-project-promotion-candidates.jsonl');
 }
 
 const GIT_HASH_REGEX = /^[a-f0-9]{7,64}$/i;
@@ -175,6 +198,117 @@ function readFixDiff(worktree: string, hash: string): string {
 
 function appendAckRecord(projectKey: string, record: AckRecord): void {
     appendJsonlRecord(getAckStatusPath(projectKey), record as unknown as Record<string, unknown>);
+}
+
+const PRUNE_CANDIDATE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isPruneCandidateRule(rule: Rule): boolean {
+    if (rule.type !== 'soft') return false;
+    if (rule.pattern.scope === 'prompt') return false;
+    if (rule.violation_count !== 0) return false;
+    return Date.now() - parseIsoDate(rule.created_at) >= PRUNE_CANDIDATE_AGE_MS;
+}
+
+function markPruneCandidates(projectKey: string, pruneGuardEnabled: boolean): void {
+    const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
+        .filter((rule) => rule.project_key === projectKey);
+
+    for (const rule of softRules) {
+        if (!isPruneCandidateRule(rule)) continue;
+
+        const timestamp = new Date().toISOString();
+        rule.prune_candidate = {
+            marked_at: timestamp,
+            reason: 'stale_unused_rule',
+            guard_enabled: pruneGuardEnabled,
+        };
+
+        const rulePath = join(HARNESS_DIR, 'rules/soft', `${rule.id}.json`);
+        writeFileSync(rulePath, JSON.stringify(rule, null, 2));
+
+        const record: RulePruneCandidateRecord = {
+            id: generateId(),
+            project_key: projectKey,
+            rule_id: rule.id,
+            timestamp,
+            pattern_match: rule.pattern.match,
+            pattern_scope: rule.pattern.scope,
+            reason: rule.prune_candidate.reason,
+            guard_enabled: pruneGuardEnabled,
+        };
+
+        appendJsonlRecord(getRulePruneCandidatePath(projectKey), record as unknown as Record<string, unknown>);
+        appendHistory('rule_prune_candidate_marked', {
+            project_key: projectKey,
+            rule_id: rule.id,
+            pattern: rule.pattern.match,
+            scope: rule.pattern.scope,
+            reason: record.reason,
+            guard_enabled: pruneGuardEnabled,
+        });
+    }
+}
+
+function getExactRuleCandidateKey(rule: Rule): string {
+    return [rule.type, rule.pattern.type, rule.pattern.scope, rule.pattern.match].join('::');
+}
+
+function recordCrossProjectPromotionCandidates(projectKey: string, guardEnabled: boolean): void {
+    const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
+        .filter((rule) => rule.type === 'soft' && rule.project_key !== 'global');
+    if (softRules.length === 0) return;
+
+    const grouped = new Map<string, { pattern_match: string; pattern_scope: Rule['pattern']['scope']; rules: Rule[]; project_keys: Set<string> }>();
+
+    for (const rule of softRules) {
+        const candidateKey = getExactRuleCandidateKey(rule);
+        const existing = grouped.get(candidateKey);
+        if (existing) {
+            existing.rules.push(rule);
+            existing.project_keys.add(rule.project_key);
+            continue;
+        }
+
+        grouped.set(candidateKey, {
+            pattern_match: rule.pattern.match,
+            pattern_scope: rule.pattern.scope,
+            rules: [rule],
+            project_keys: new Set([rule.project_key]),
+        });
+    }
+
+    const candidatePath = getCrossProjectPromotionCandidatePath();
+
+    for (const [candidateKey, groupedRule] of grouped.entries()) {
+        if (groupedRule.project_keys.size < 2) continue;
+
+        const projectKeys = [...groupedRule.project_keys].map(String).sort();
+        const ruleIds = groupedRule.rules.map((rule) => rule.id).sort();
+
+        const record: CrossProjectPromotionCandidateRecord = {
+            id: generateId(),
+            project_key: 'global',
+            timestamp: new Date().toISOString(),
+            candidate_key: candidateKey,
+            pattern_match: groupedRule.pattern_match,
+            pattern_scope: groupedRule.pattern_scope,
+            project_keys: projectKeys,
+            rule_ids: ruleIds,
+            occurrence_count: groupedRule.rules.length,
+            guard_enabled: guardEnabled,
+        };
+
+        appendJsonlRecord(candidatePath, record as unknown as Record<string, unknown>);
+        appendHistory('cross_project_promotion_candidate_recorded', {
+            project_key: projectKey,
+            candidate_key: candidateKey,
+            pattern: groupedRule.pattern_match,
+            scope: groupedRule.pattern_scope,
+            project_keys: projectKeys,
+            rule_ids: ruleIds,
+            guard_enabled: guardEnabled,
+        });
+    }
 }
 
 export function evaluateAckAcceptance(signal: Signal, ackPath: string): { accepted: boolean; reason: string; acceptance_check: 'rule_written' } {
@@ -1091,6 +1225,10 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
             // 30일 효과 측정
             evaluateRuleEffectiveness();
+
+            // Step 5c: candidate-first rule lifecycle (append-only)
+            markPruneCandidates(projectKey, settings.prune_guard_enabled);
+            recordCrossProjectPromotionCandidates(projectKey, settings.cross_project_promotion_guard_enabled);
 
             // Phase 3: Memory Index — 세션에서 키워드 추출
             try {

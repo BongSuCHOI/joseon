@@ -33,6 +33,11 @@ export interface Rule {
     description: string;
     violation_count: number;
     last_violation_at?: string;
+    prune_candidate?: {
+        marked_at: string;
+        reason: string;
+        guard_enabled: boolean;
+    };
     effectiveness?: {
         measured_at: string;
         recurrence_after_rule: number;
@@ -189,4 +194,28 @@ export interface CompactionRelevanceShadowRecord {
         fact_ids: string[];
     };
     shadow_candidates: CompactionShadowCandidateRecord[];
+}
+
+export interface RulePruneCandidateRecord {
+    id: string;
+    project_key: string;
+    rule_id: string;
+    timestamp: string;
+    pattern_match: string;
+    pattern_scope: Rule['pattern']['scope'];
+    reason: string;
+    guard_enabled: boolean;
+}
+
+export interface CrossProjectPromotionCandidateRecord {
+    id: string;
+    project_key: 'global';
+    timestamp: string;
+    candidate_key: string;
+    pattern_match: string;
+    pattern_scope: Rule['pattern']['scope'];
+    project_keys: string[];
+    rule_ids: string[];
+    occurrence_count: number;
+    guard_enabled: boolean;
 }

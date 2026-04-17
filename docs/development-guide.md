@@ -379,6 +379,10 @@ cat ~/.config/opencode/harness/projects/*/ack-status.jsonl
 cat ~/.config/opencode/harness/projects/*/memory-upper-shadow.jsonl
 cat ~/.config/opencode/harness/projects/*/compacting-relevance-shadow.jsonl
 
+# Step 5c 규칙 수명 주기
+cat ~/.config/opencode/harness/projects/*/rule-prune-candidates.jsonl
+cat ~/.config/opencode/harness/projects/global/cross-project-promotion-candidates.jsonl
+
 # 활성 규칙
 ls ~/.config/opencode/harness/rules/hard/
 ls ~/.config/opencode/harness/rules/soft/
@@ -489,3 +493,6 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-17 | Step 5b reduced-safe | npm run build | ✅ | Extract shadow + compacting relevance shadow + semantic_compacting_enabled 기본값 false 반영 |
 | 2026-04-17 | Step 5b reduced-safe | smoke test | ✅ | Step 5a 회귀 22/22 + Step 5b smoke 22/22 통과 |
 | 2026-04-17 | Step 5b reduced-safe | tmux 실세션 | ✅ | opencode run 정상 응답 확인. 이 검증은 shadow 파일 생성용이 아니라 플러그인 로드/기본 응답 sanity check이며, shadow 파일은 smoke로 확인 |
+| 2026-04-17 | Step 5c | npm run build | ✅ | prune candidate / cross-project candidate 경로 반영 |
+| 2026-04-17 | Step 5c | unit-step5c-rule-lifecycle | ✅ | pruning matrix + cross-project exact-match aggregation + guarded-off global write 확인 |
+| 2026-04-17 | Step 5c | smoke-step5c-rule-lifecycle | ✅ | session.idle 기반 rule lifecycle smoke 통과 |
