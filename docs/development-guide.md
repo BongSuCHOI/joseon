@@ -376,10 +376,12 @@ find ~/.config/opencode/harness/ -type f | sort
 # 오늘 도구 로그
 cat ~/.config/opencode/harness/logs/tools/$(date +%Y-%m-%d).jsonl
 
-# Step 5a 그림자/ack 로그
+# Step 5a / Step 5b 그림자 로그
 cat ~/.config/opencode/harness/projects/*/phase-signal-shadow.jsonl
 cat ~/.config/opencode/harness/projects/*/mistake-pattern-shadow.jsonl
 cat ~/.config/opencode/harness/projects/*/ack-status.jsonl
+cat ~/.config/opencode/harness/projects/*/memory-upper-shadow.jsonl
+cat ~/.config/opencode/harness/projects/*/compacting-relevance-shadow.jsonl
 
 # 활성 규칙
 ls ~/.config/opencode/harness/rules/hard/
@@ -488,3 +490,6 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-16 | fix_commit 테스트 | smoke-test.ts에 5개 신규 테스트 | ✅ | 43/43 통과 (기존 38 + source_file 금지 5) |
 | 2026-04-16 | Step 5a | npm run build | ✅ | phase/signal shadow, mistake-summary shadow, ack-status guard 반영 |
 | 2026-04-16 | Step 5a | smoke test | ✅ | phase/signal 그림자 로그 + mistake-pattern 그림자 로그 + written/accepted ack 로그 확인, ack_guard_enabled 기본값 false |
+| 2026-04-17 | Step 5b reduced-safe | npm run build | ✅ | Extract shadow + compacting relevance shadow + semantic_compacting_enabled 기본값 false 반영 |
+| 2026-04-17 | Step 5b reduced-safe | smoke test | ✅ | Step 5a 회귀 22/22 + Step 5b smoke 22/22 통과 |
+| 2026-04-17 | Step 5b reduced-safe | tmux 실세션 | ✅ | opencode run 정상 응답 확인. 이 검증은 shadow 파일 생성용이 아니라 플러그인 로드/기본 응답 sanity check이며, shadow 파일은 smoke로 확인 |

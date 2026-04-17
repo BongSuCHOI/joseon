@@ -115,13 +115,13 @@ Orchestrator (최상위, 기본 에이전트)
 ### Step 4 이후 고도화 (시기 미정)
 
 - 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
-- Step 5a 기준: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그와 default-off guard까지 구현·검증됨. 본 경로 롤아웃은 아직 아님.
+- Step 5a 기준: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그와 default-off guard까지 구현·검증됨. reduced-safe 5b로 Extract shadow + compacting relevance shadow/default-off도 추가됐지만, 본 경로 롤아웃은 아직 아님.
 
 | 항목 | 상태 / 전략 | 요약 |
 |------|-------------|------|
-| 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | 계획 — shadow | Sync/Index/Search 위에 데이터가 쌓이면 상위 4단계를 순차 승격. |
+| 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | shadow | reduced-safe 5b로 Extract shadow만 추가. Consolidate/Relate/Recall은 계속 후속 승격 대상. |
 | 규칙 자동 삭제 (Pruning) | 계획 — guarded | 측정은 유지하고, 삭제는 충분한 데이터와 낮은 오탐 위험이 확인될 때만. |
-| Compacting 의미 기반 규칙 필터링 | 계획 — default-off shadow | 기존 compacting은 유지, 관련성 필터는 토큰 압박과 노이즈가 확인되면 도입. |
+| Compacting 의미 기반 규칙 필터링 | default-off shadow | reduced-safe 5b로 metadata-first shadow + opt-in 경로 추가. 기본 compacting은 계속 유지. |
 | LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | shadow | deterministic baseline 유지 + phase/signal 그림자 로깅. |
 | fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로는 유지하고, mistake_summary 그림자 로깅만 축적. |
 | Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |

@@ -1,48 +1,51 @@
 ## Context
 
-하위 기억 경로는 이미 존재하지만, 상위 의미층은 아직 그림자 검증이 필요하다. 이 변경은 기존 Search를 바꾸지 않고, 상위 4단계와 의미 기반 compacting을 먼저 기록·비교하는 설계다.
+하위 기억 경로는 이미 존재하지만, 상위 의미층은 아직 그림자 검증이 필요하다. 이번 축소 5b는 기존 Search를 건드리지 않고, **Extract shadow**와 **semantic compacting relevance shadow/default-off 필터**만 추가한다.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Extract / Consolidate / Relate / Recall 후보를 shadow로 기록한다.
-- compacting 필터는 default-off로 두고 relevance 점수를 먼저 관찰한다.
-- 현재 Search 및 기억 저장 흐름을 기본값에서 유지한다.
+- session log → fact 인덱싱 시 Extract 후보를 append-only shadow로 기록한다.
+- compacting 필터는 default-off로 두고 relevance shadow를 남긴다.
+- opt-in 시 compacting 후보를 metadata-first로 정렬한다. 현재 reduced-safe 구현에서 fact 후보 풀은 기존 lexical match 결과를 재사용하고, 그 안에서 메타데이터 우선 정렬을 적용한다.
+- 현재 Search 및 compacting 기본 흐름을 비활성 상태에서 유지한다.
 
 **Non-Goals:**
-- Search 결과를 LLM 기반으로 즉시 재정렬하지 않는다.
+- Consolidate / Relate / Recall 본 경로를 구현하지 않는다.
+- Search 결과를 새 필터로 즉시 재정렬하지 않는다.
 - 의미 기반 compacting을 기본값으로 켜지 않는다.
+- LLM / embedding 기반 relevance를 넣지 않는다.
 - 외부 트렌드 자동 수집, todo-continuation, autopilot을 포함하지 않는다.
 
 ## Decisions
 
-### D1: 상위 기억 단계는 append-only shadow로 시작한다
+### D1: 상위 기억은 Extract shadow 한 조각만 먼저 쌓는다
 
-추출 결과를 덮어쓰지 않고 후보 레코드로 쌓는다. 대안인 직접 승격은 데이터가 충분하지 않으면 환각을 키운다.
+현재 파이프라인에서 가장 안전한 지점은 session log에서 fact를 materialize하는 순간이다. 여기서 Extract 후보를 프로젝트별 JSONL에 append-only로 남긴다. Consolidate / Relate / Recall은 후속 승격까지 미룬다.
 
-### D2: compacting은 metadata-first 필터를 우선한다
+### D2: compacting relevance는 사용 가능한 메타데이터만 쓴다
 
-project_key, scope, 최근 사용, 최근 위반 같은 메타데이터를 먼저 쓰고, 필요할 때만 추가 의미 점수를 얹는다. 대안인 embedding-first는 비용과 운영 복잡도가 높다.
+이번 조각은 `project_key`, `scope`, 최근 활동(created/last_violation), 최근 위반 같은 현재 저장된 메타데이터를 우선 사용한다. 다만 fact 후보 풀 자체는 기존 lexical match 결과를 재사용하고, 그 안에서 메타데이터 우선 정렬을 적용한다. 더 무거운 LLM/embedding 로직은 넣지 않는다.
 
-### D3: baseline Search는 변경하지 않는다
+### D3: default-off일 때 선택 결과는 baseline과 동일해야 한다
 
-Search 결과를 새 필터로 바꾸지 않고 shadow 비교만 수행한다. 대안인 inline 재정렬은 롤백이 어렵다.
+필터가 꺼져 있으면 현재 soft rule/fact 선택 순서를 그대로 사용하고, shadow 로그만 추가한다. 켜졌을 때만 metadata-first 정렬 결과를 실제 compacting에 반영한다.
 
 ## Risks / Trade-offs
 
-- [상위 단계 후보가 과하게 쌓임] → shadow retention과 샘플링을 분리한다.
-- [의미 필터가 너무 좁음] → default-off로 시작하고 shadow 비교로 튜닝한다.
-- [Search와 shadow 결과 불일치] → baseline을 기준으로 비교 로그를 남긴다.
+- [Extract shadow가 빠르게 쌓임] → append-only를 유지하되 승격 판단은 별도 체크리스트로 미룬다.
+- [metadata-only 필터가 거칠 수 있음] → default-off + shadow 비교를 기준으로 튜닝한다.
+- [기존 facts에 project_key가 없을 수 있음] → legacy fact는 낮은 우선순위로 두되 완전히 배제하지 않는다.
 
 ## Migration Plan
 
-1. 상위 4단계 후보를 shadow로만 기록한다.
-2. compacting 필터 점수를 shadow로 비교한다.
-3. 충분한 데이터가 쌓이면 explicit opt-in으로만 실제 compacting에 반영한다.
-4. 문제 발생 시 shadow 기록만 남기고 현재 Search 경로로 즉시 복귀한다.
+1. OpenSpec 범위를 Extract shadow + semantic compacting shadow/default-off로 축소한다.
+2. Extract shadow와 compacting relevance shadow를 append-only 로그로 추가한다.
+3. opt-in 설정에서만 metadata-first 정렬을 compacting에 반영한다.
+4. shadow 로그와 실세션 결과가 쌓이면 full 5b 승격 여부를 다시 판단한다.
 
 ## Open Questions
 
-- 상위 4단계 후보 파일을 세션별로 둘지 프로젝트별로 둘지
-- 의미 점수의 최소 기준을 메타데이터만으로 둘지 LLM을 섞을지
-- shadow retention 기간을 몇 세션 기준으로 둘지
+- Extract shadow retention을 프로젝트 단위 그대로 둘지, 세션별 rotate를 둘지
+- recent activity를 created_at만으로 충분히 볼지, 별도 last_used 메타데이터를 추가할지
+- full 5b 승격 시 Consolidate / Relate / Recall을 어떤 순서로 켤지
