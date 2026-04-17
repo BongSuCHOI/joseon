@@ -168,7 +168,6 @@ function createReviewerDef(): AgentDefinition {
         config: { prompt: loadPrompt('reviewer.md'), temperature: 0.1 },
         mode: 'subagent',
         hidden: false,
-        permission: { file_edit: 'deny' },
     };
 }
 
@@ -218,7 +217,6 @@ function createAdvisorDef(): AgentDefinition {
         config: { prompt: loadPrompt('advisor.md'), temperature: 0.1 },
         mode: 'subagent',
         hidden: false,
-        permission: { file_edit: 'deny' },
     };
 }
 
