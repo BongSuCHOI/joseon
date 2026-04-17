@@ -1,0 +1,38 @@
+## ADDED Requirements
+
+### Requirement: LLM phase and signal shadow recording
+The system SHALL record shadow labels for phase and signal relevance while keeping the deterministic phase state and signal emission path unchanged.
+
+#### Scenario: Shadow record is appended without baseline change
+- **WHEN** a session event produces a candidate phase or signal decision
+- **THEN** the system SHALL append a shadow record and SHALL NOT modify the existing phase file or deterministic signal result
+
+#### Scenario: Shadow record tolerates low confidence
+- **WHEN** the LLM result has low confidence or is unavailable
+- **THEN** the system SHALL keep the deterministic result as the source of truth and SHALL record only the shadow outcome
+
+### Requirement: Diff-based mistake-pattern shadow learning
+The system SHALL extract mistake summaries from fix diffs and store them as shadow learning records without auto-promoting rules.
+
+#### Scenario: Fix diff creates a shadow summary
+- **WHEN** a fix commit diff is available
+- **THEN** the system SHALL append a `mistake_summary` shadow record that captures the observed mistake pattern
+
+#### Scenario: Ambiguous diff stays in shadow mode
+- **WHEN** the diff is too large or ambiguous to classify safely
+- **THEN** the system SHALL store the partial summary only and SHALL NOT promote it to a rule candidate
+
+### Requirement: Guarded ack strengthening
+The system SHALL keep the existing written-ack behavior by default and SHALL promote an ack to accepted only when the guard and acceptance check both pass.
+
+#### Scenario: Guard disabled keeps written ack
+- **WHEN** ack strengthening is disabled or no guard is configured
+- **THEN** the system SHALL preserve the existing written-ack flow
+
+#### Scenario: Acceptance passes under guard
+- **WHEN** ack strengthening is enabled and the acceptance check passes
+- **THEN** the system SHALL record an accepted ack in addition to the written ack state
+
+#### Scenario: Acceptance fails under guard
+- **WHEN** ack strengthening is enabled but the acceptance check fails
+- **THEN** the system SHALL keep the ack in written state and SHALL NOT close it as accepted

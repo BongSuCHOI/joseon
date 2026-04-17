@@ -7,26 +7,26 @@ The orchestrator system prompt SHALL define it as the primary entry point for al
 - **WHEN** user asks "explain this file"
 - **THEN** orchestrator SHALL answer directly without Phase involvement
 
-#### Scenario: Orchestrator delegates to build
+#### Scenario: Orchestrator delegates to builder
 - **WHEN** user requests a large implementation task
 - **THEN** orchestrator SHALL delegate to @builder via Task tool with context
 
 #### Scenario: Orchestrator delegates to independent subagent
 - **WHEN** user requests a small bug fix
-- **THEN** orchestrator MAY delegate directly to @fixer or handle itself without @builder
+- **THEN** orchestrator MAY delegate directly to @coder or handle itself without @builder
 
-### Requirement: Build PM prompt
+### Requirement: Builder PM prompt
 The @builder system prompt SHALL define it as Phase PM that manages Phase 1-5 workflow, distributes work to subagents, resets Phase on completion, and reports back to Orchestrator. It SHALL NOT engage in general conversation.
 
-#### Scenario: Build manages Phase workflow
+#### Scenario: Builder manages Phase workflow
 - **WHEN** @builder receives a delegated task
 - **THEN** it SHALL start Phase 1 (planning) and progress through phases using phase-manager
 
-#### Scenario: Build resets Phase on completion
+#### Scenario: Builder resets Phase on completion
 - **WHEN** @builder completes Phase 5
 - **THEN** it SHALL call resetPhase() and report completion to Orchestrator
 
-#### Scenario: Build detects incomplete phase
+#### Scenario: Builder detects incomplete phase
 - **WHEN** @builder is invoked and an incomplete phase exists
 - **THEN** it SHALL ask the user whether to resume or restart
 
@@ -54,8 +54,8 @@ Each subagent SHALL have a focused system prompt defining its role, constraints,
 - **THEN** its prompt SHALL define it as UI/UX design specialist with creative freedom (temperature 0.7)
 
 ### Requirement: Prompt loading from files
-Agent prompts SHALL be loaded from `src/agents/prompts/{agent-name}.md` files. The factory functions SHALL read these files and embed them in agent config.
+Agent prompts SHALL be loaded from `src/agents/prompts/{agent-name}.md` files. The agent construction logic in `src/agents/agents.ts` SHALL read these files and embed them in agent config.
 
 #### Scenario: Load orchestrator prompt
-- **WHEN** `createOrchestratorAgent()` is called
-- **THEN** it SHALL read `src/agents/prompts/orchestrator.md` and use it as the system prompt
+- **WHEN** orchestrator agent definitions are constructed
+- **THEN** the system SHALL read `src/agents/prompts/orchestrator.md` and use it as the system prompt
