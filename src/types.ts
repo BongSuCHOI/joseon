@@ -143,3 +143,50 @@ export interface AckRecord {
     accepted: boolean;
     reason: string;
 }
+
+export interface MemoryFact {
+    id: string;
+    project_key?: string;
+    keywords: string[];
+    content: string;
+    source_session: string;
+    created_at: string;
+}
+
+export interface UpperMemoryExtractShadowRecord {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    stage: 'extract';
+    source: 'session_log';
+    fact_id: string;
+    source_session: string;
+    keywords: string[];
+    content: string;
+}
+
+export interface CompactionShadowCandidateRecord {
+    candidate_id: string;
+    candidate_kind: 'soft_rule' | 'fact';
+    metadata_score: number;
+    lexical_score: number;
+    reasons: string[];
+}
+
+export interface CompactionRelevanceShadowRecord {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    filter_enabled: boolean;
+    query: string;
+    max_results: number;
+    baseline_selection: {
+        soft_rule_ids: string[];
+        fact_ids: string[];
+    };
+    applied_selection: {
+        soft_rule_ids: string[];
+        fact_ids: string[];
+    };
+    shadow_candidates: CompactionShadowCandidateRecord[];
+}

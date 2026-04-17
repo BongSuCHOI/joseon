@@ -5,7 +5,16 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
-import type { Signal, Rule, ProjectState, MistakeSummaryShadowRecord, AckRecord } from '../types.js';
+import type {
+    Signal,
+    Rule,
+    ProjectState,
+    MistakeSummaryShadowRecord,
+    AckRecord,
+    MemoryFact,
+    UpperMemoryExtractShadowRecord,
+    CompactionRelevanceShadowRecord,
+} from '../types.js';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
@@ -76,6 +85,14 @@ function getMistakeShadowPath(projectKey: string): string {
 
 function getAckStatusPath(projectKey: string): string {
     return join(HARNESS_DIR, 'projects', projectKey, 'ack-status.jsonl');
+}
+
+function getUpperMemoryShadowPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'memory-upper-shadow.jsonl');
+}
+
+function getCompactionShadowPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'compacting-relevance-shadow.jsonl');
 }
 
 const GIT_HASH_REGEX = /^[a-f0-9]{7,64}$/i;
@@ -211,6 +228,284 @@ export function buildBoundedCompactionContext(parts: string[], charCeiling: numb
     }
 
     return bounded;
+}
+
+function appendUpperMemoryExtractShadow(projectKey: string, fact: MemoryFact): UpperMemoryExtractShadowRecord {
+    const record: UpperMemoryExtractShadowRecord = {
+        id: generateId(),
+        project_key: projectKey,
+        timestamp: new Date().toISOString(),
+        stage: 'extract',
+        source: 'session_log',
+        fact_id: fact.id,
+        source_session: fact.source_session,
+        keywords: fact.keywords,
+        content: fact.content,
+    };
+
+    appendJsonlRecord(getUpperMemoryShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    return record;
+}
+
+function isProjectScopedSessionLog(sessionPath: string, sessionFile: string, projectKey: string): boolean {
+    const normalizedFile = sessionFile.toLowerCase();
+    const normalizedProjectKey = projectKey.toLowerCase();
+
+    try {
+        const lines = readFileSync(sessionPath, 'utf-8').split('\n').filter(Boolean);
+        let sawProjectMetadata = false;
+
+        for (const line of lines) {
+            const entry = JSON.parse(line);
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+
+            if (!Object.prototype.hasOwnProperty.call(entry, 'project_key')) continue;
+            sawProjectMetadata = true;
+
+            const entryProjectKey = typeof (entry as { project_key?: unknown }).project_key === 'string'
+                ? String((entry as { project_key?: string }).project_key).toLowerCase()
+                : '';
+
+            if (entryProjectKey !== normalizedProjectKey) return false;
+        }
+
+        if (sawProjectMetadata) return true;
+    } catch {
+        // fall back to safe filename patterns when metadata is unavailable or unreadable
+    }
+
+    return normalizedFile.includes(`-${normalizedProjectKey}.jsonl`) ||
+        normalizedFile.includes(`_${normalizedProjectKey}.jsonl`) ||
+        normalizedFile.startsWith(`${normalizedProjectKey}.jsonl`) ||
+        normalizedFile.startsWith(`${normalizedProjectKey}-`) ||
+        normalizedFile.startsWith(`${normalizedProjectKey}_`) ||
+        normalizedFile.startsWith(`session_${normalizedProjectKey}_`);
+}
+
+function parseIsoDate(value?: string): number {
+    if (!value) return 0;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getRecentActivityBoost(value?: string): number {
+    const parsed = parseIsoDate(value);
+    if (!parsed) return 0;
+
+    const ageMs = Date.now() - parsed;
+    if (ageMs <= 24 * 60 * 60 * 1000) return 30;
+    if (ageMs <= 7 * 24 * 60 * 60 * 1000) return 20;
+    if (ageMs <= 30 * 24 * 60 * 60 * 1000) return 10;
+    return 0;
+}
+
+function scoreFactsByQuery(facts: MemoryFact[], query: string): Array<{ fact: MemoryFact; score: number }> {
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
+
+    return facts
+        .map((fact) => {
+            const factText = `${fact.keywords.join(' ')} ${fact.content}`.toLowerCase();
+            const score = queryWords.reduce((acc, word) => acc + (factText.includes(word) ? 1 : 0), 0);
+            return { fact, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+}
+
+export interface RankedSemanticRuleCandidate {
+    rule: Rule;
+    metadata_score: number;
+    lexical_score: number;
+    reasons: string[];
+}
+
+export interface RankedSemanticFactCandidate {
+    fact: MemoryFact;
+    metadata_score: number;
+    lexical_score: number;
+    reasons: string[];
+}
+
+export interface CompactionSelectionPlan {
+    baseline_soft_rules: Rule[];
+    applied_soft_rules: Rule[];
+    semantic_soft_candidates: RankedSemanticRuleCandidate[];
+    baseline_facts: MemoryFact[];
+    applied_facts: MemoryFact[];
+    semantic_fact_candidates: RankedSemanticFactCandidate[];
+}
+
+export function selectBaselineSoftRules(softRules: Rule[], maxResults: number): Rule[] {
+    return [...softRules]
+        .sort((a, b) => (b.violation_count - a.violation_count) || b.created_at.localeCompare(a.created_at))
+        .slice(0, maxResults);
+}
+
+export function rankSemanticSoftRules(softRules: Rule[], projectKey: string): RankedSemanticRuleCandidate[] {
+    return [...softRules]
+        .map((rule) => {
+            let metadataScore = 0;
+            const reasons: string[] = [];
+
+            if (rule.project_key === projectKey) {
+                metadataScore += 40;
+                reasons.push('project_exact');
+            } else if (rule.project_key === 'global') {
+                metadataScore += 10;
+                reasons.push('project_global');
+            }
+
+            if (rule.pattern.scope === 'prompt') {
+                metadataScore += 30;
+                reasons.push('scope_prompt');
+            } else if (rule.pattern.scope === 'tool') {
+                metadataScore += 20;
+                reasons.push('scope_tool');
+            } else {
+                metadataScore += 10;
+                reasons.push('scope_file');
+            }
+
+            if (rule.violation_count > 0) {
+                metadataScore += Math.min(rule.violation_count, 5) * 4;
+                reasons.push(`violation_count:${rule.violation_count}`);
+            }
+
+            const recentViolationBoost = getRecentActivityBoost(rule.last_violation_at);
+            if (recentViolationBoost > 0) {
+                metadataScore += recentViolationBoost;
+                reasons.push(`recent_violation:+${recentViolationBoost}`);
+            }
+
+            const recentActivityBoost = getRecentActivityBoost(rule.created_at);
+            if (recentActivityBoost > 0) {
+                metadataScore += Math.max(5, Math.floor(recentActivityBoost / 2));
+                reasons.push(`recent_activity:+${Math.max(5, Math.floor(recentActivityBoost / 2))}`);
+            }
+
+            return {
+                rule,
+                metadata_score: metadataScore,
+                lexical_score: 0,
+                reasons,
+            };
+        })
+        .sort((a, b) =>
+            (b.metadata_score - a.metadata_score) ||
+            (b.rule.violation_count - a.rule.violation_count) ||
+            b.rule.created_at.localeCompare(a.rule.created_at),
+        );
+}
+
+export function rankSemanticFacts(facts: MemoryFact[], projectKey: string, query: string): RankedSemanticFactCandidate[] {
+    return scoreFactsByQuery(facts, query)
+        .map(({ fact, score }) => {
+            let metadataScore = 0;
+            const reasons: string[] = [];
+
+            if (fact.project_key === projectKey) {
+                metadataScore += 40;
+                reasons.push('project_exact');
+            } else if (!fact.project_key) {
+                metadataScore += 5;
+                reasons.push('project_legacy');
+            }
+
+            const recentActivityBoost = getRecentActivityBoost(fact.created_at);
+            if (recentActivityBoost > 0) {
+                metadataScore += recentActivityBoost;
+                reasons.push(`recent_activity:+${recentActivityBoost}`);
+            }
+
+            return {
+                fact,
+                metadata_score: metadataScore,
+                lexical_score: score,
+                reasons,
+            };
+        })
+        .sort((a, b) =>
+            (b.metadata_score - a.metadata_score) ||
+            (b.lexical_score - a.lexical_score) ||
+            b.fact.created_at.localeCompare(a.fact.created_at),
+        );
+}
+
+export function planCompactionSelections(
+    projectKey: string,
+    softRules: Rule[],
+    facts: MemoryFact[],
+    query: string,
+    maxResults: number,
+    semanticCompactingEnabled: boolean,
+): CompactionSelectionPlan {
+    const baselineSoftRules = selectBaselineSoftRules(softRules, maxResults);
+    const semanticSoftCandidates = rankSemanticSoftRules(softRules, projectKey);
+    const appliedSoftRules = semanticCompactingEnabled
+        ? semanticSoftCandidates.slice(0, maxResults).map((candidate) => candidate.rule)
+        : baselineSoftRules;
+
+    const baselineFacts = scoreFactsByQuery(facts, query)
+        .slice(0, maxResults)
+        .map((item) => item.fact);
+    const semanticFactCandidates = rankSemanticFacts(facts, projectKey, query);
+    const appliedFacts = semanticCompactingEnabled
+        ? semanticFactCandidates.slice(0, maxResults).map((candidate) => candidate.fact)
+        : baselineFacts;
+
+    return {
+        baseline_soft_rules: baselineSoftRules,
+        applied_soft_rules: appliedSoftRules,
+        semantic_soft_candidates: semanticSoftCandidates,
+        baseline_facts: baselineFacts,
+        applied_facts: appliedFacts,
+        semantic_fact_candidates: semanticFactCandidates,
+    };
+}
+
+function appendCompactionShadowRecord(
+    projectKey: string,
+    query: string,
+    maxResults: number,
+    filterEnabled: boolean,
+    plan: CompactionSelectionPlan,
+): CompactionRelevanceShadowRecord {
+    const record: CompactionRelevanceShadowRecord = {
+        id: generateId(),
+        project_key: projectKey,
+        timestamp: new Date().toISOString(),
+        filter_enabled: filterEnabled,
+        query: query.slice(0, 1000),
+        max_results: maxResults,
+        baseline_selection: {
+            soft_rule_ids: plan.baseline_soft_rules.map((rule) => rule.id),
+            fact_ids: plan.baseline_facts.map((fact) => fact.id),
+        },
+        applied_selection: {
+            soft_rule_ids: plan.applied_soft_rules.map((rule) => rule.id),
+            fact_ids: plan.applied_facts.map((fact) => fact.id),
+        },
+        shadow_candidates: [
+            ...plan.semantic_soft_candidates.slice(0, maxResults).map((candidate) => ({
+                candidate_id: candidate.rule.id,
+                candidate_kind: 'soft_rule' as const,
+                metadata_score: candidate.metadata_score,
+                lexical_score: candidate.lexical_score,
+                reasons: candidate.reasons,
+            })),
+            ...plan.semantic_fact_candidates.slice(0, maxResults).map((candidate) => ({
+                candidate_id: candidate.fact.id,
+                candidate_kind: 'fact' as const,
+                metadata_score: candidate.metadata_score,
+                lexical_score: candidate.lexical_score,
+                reasons: candidate.reasons,
+            })),
+        ],
+    };
+
+    appendJsonlRecord(getCompactionShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    return record;
 }
 
 // ─── Phase 2: syncRulesMarkdown — .opencode/rules/ 마크다운 동기화 ──
@@ -574,14 +869,6 @@ const MEMORY_KEYWORDS = [
     /FIXME:\s*(.+)/i,
 ];
 
-interface MemoryFact {
-    id: string;
-    keywords: string[];
-    content: string;
-    source_session: string;
-    created_at: string;
-}
-
 function indexSessionFacts(projectKey: string): void {
     const sessionDir = join(HARNESS_DIR, 'logs/sessions');
     if (!existsSync(sessionDir)) return;
@@ -589,10 +876,12 @@ function indexSessionFacts(projectKey: string): void {
     const factsDir = join(HARNESS_DIR, 'memory/facts');
     mkdirSync(factsDir, { recursive: true });
 
-    // 세션 JSONL 파일 읽기 (모든 세션에서 추출 — 파일명에 projectKey가 없을 수 있음)
-    const sessionFiles = readdirSync(sessionDir).filter(
-        (f) => f.endsWith('.jsonl'),
-    );
+    // 현재 프로젝트로 범위가 명확한 세션 JSONL만 읽는다.
+    // 애매한 파일까지 읽으면 다른 프로젝트 데이터가 현재 projectKey로 오염될 수 있다.
+    const sessionFiles = readdirSync(sessionDir).filter((f) => {
+        if (!f.endsWith('.jsonl')) return false;
+        return isProjectScopedSessionLog(join(sessionDir, f), f, projectKey);
+    });
 
     for (const sessionFile of sessionFiles) {
         const sessionPath = join(sessionDir, sessionFile);
@@ -627,12 +916,23 @@ function indexSessionFacts(projectKey: string): void {
             const id = generateId();
             const factData: MemoryFact = {
                 id,
+                project_key: projectKey,
                 keywords: [...new Set(fact.keywords)], // 중복 제거
                 content: fact.content,
                 source_session: sessionFile,
                 created_at: new Date().toISOString(),
             };
             writeFileSync(join(factsDir, `${id}.json`), JSON.stringify(factData, null, 2));
+            try {
+                appendUpperMemoryExtractShadow(projectKey, factData);
+            } catch (err) {
+                logger.warn('improver', 'extract shadow append failed', {
+                    project_key: projectKey,
+                    source_session: sessionFile,
+                    fact_id: factData.id,
+                    error: err,
+                });
+            }
         }
     }
 }
@@ -642,29 +942,17 @@ function indexSessionFacts(projectKey: string): void {
 function searchFacts(query: string, maxResults = 10): MemoryFact[] {
     const factsDir = join(HARNESS_DIR, 'memory/facts');
     if (!existsSync(factsDir)) return [];
-
-    const queryLower = query.toLowerCase();
-    const queryWords = queryLower.split(/\s+/).filter(Boolean);
     const facts = loadJsonFiles<MemoryFact>(factsDir);
 
-    // 각 fact에 대해 쿼리 단어와 키워드의 교집합 점수 계산
-    const scored = facts
-        .map((fact) => {
-            const factText = `${fact.keywords.join(' ')} ${fact.content}`.toLowerCase();
-            const score = queryWords.reduce((acc, word) => acc + (factText.includes(word) ? 1 : 0), 0);
-            return { fact, score };
-        })
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxResults);
-
-    return scored.map((item) => item.fact);
+    return scoreFactsByQuery(facts, query)
+        .slice(0, maxResults)
+        .map((item) => item.fact);
 }
 
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
 // Phase 3: Memory Search 결과 주입 추가
 
-function buildCompactionContext(projectKey: string, worktree: string, maxResults: number): string[] {
+function buildCompactionContext(projectKey: string, worktree: string, maxResults: number, semanticCompactingEnabled: boolean): string[] {
     const parts: string[] = [];
 
     // Scaffold 주입
@@ -692,24 +980,30 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     // SOFT 규칙 설명 주입 (scope:prompt의 유일한 강제 수단)
     const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
         .filter((r) => r.project_key === projectKey || r.project_key === 'global');
-    if (softRules.length > 0) {
-        const prioritizedSoftRules = softRules
-            .sort((a, b) => (b.violation_count - a.violation_count) || b.created_at.localeCompare(a.created_at))
-            .slice(0, maxResults);
-        if (prioritizedSoftRules.length > 0) {
-            const descriptions = prioritizedSoftRules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
-            parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
-        }
-    }
+    const facts = loadJsonFiles<MemoryFact>(join(HARNESS_DIR, 'memory/facts'));
 
     // Phase 3: Memory Search — 관련 fact 주입
     const queryText = [
         ...hardRules.map((r) => `${r.description} ${r.pattern.match}`),
         ...softRules.map((r) => `${r.description} ${r.pattern.match}`),
     ].join(' ');
-    const relevantFacts = searchFacts(queryText, maxResults);
-    if (relevantFacts.length > 0) {
-        const factLines = relevantFacts.map(
+    const plan = planCompactionSelections(projectKey, softRules, facts, queryText, maxResults, semanticCompactingEnabled);
+    try {
+        appendCompactionShadowRecord(projectKey, queryText, maxResults, semanticCompactingEnabled, plan);
+    } catch (err) {
+        logger.warn('improver', 'compaction shadow append failed', {
+            project_key: projectKey,
+            error: err,
+        });
+    }
+
+    if (plan.applied_soft_rules.length > 0) {
+        const descriptions = plan.applied_soft_rules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
+        parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
+    }
+
+    if (plan.applied_facts.length > 0) {
+        const factLines = plan.applied_facts.map(
             (f) => `- [${f.source_session}] ${f.content} (keywords: ${f.keywords.join(', ')})`,
         );
         parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
@@ -811,7 +1105,7 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
         // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
         'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
-            const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results);
+            const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results, settings.semantic_compacting_enabled);
             for (const part of parts) {
                 output.context.push(part);
             }
