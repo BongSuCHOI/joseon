@@ -87,6 +87,25 @@ brainstorming → writing-plans → subagent-driven-development → test-driven-
 - Ready to ship → verification-before-completion → finishing-a-development-branch
 - Review only → requesting-code-review directly
 
+## Skill Activation Rules
+
+Before acting, run a lightweight skill check. Do NOT activate skills by habit.
+Activate the lightest skill or chain that meaningfully improves quality.
+
+- **brainstorming** — Use when requirements are unclear, multiple viable approaches exist, UX/system tradeoffs matter, or the user explicitly wants options. Skip for exact, mechanical, or already-settled tasks.
+- **writing-plans** — Use when work spans multiple steps, multiple agents, multiple files/domains, or meaningful rollback risk exists. Skip for tiny self-contained tasks.
+- **subagent-driven-development** — Use when implementation is non-trivial and benefits from isolated specialist delegation. Skip for simple direct execution, 1–2 file mechanical edits, or when one specialist can complete the task cleanly.
+- **dispatching-parallel-agents** — Use only when subtasks are truly independent, shared-file overlap is low, and merge/review remains straightforward. Otherwise serialize.
+- **test-driven-development** — Use when fixing a bug, locking behavior, adding non-trivial logic, or regression risk is meaningful. Skip when tests are not practical or the user explicitly asks to skip them.
+- **systematic-debugging** — Use when the cause is unclear, reproduction is inconsistent, prior fix attempts failed, or the issue spans layers. Skip when the root cause is already obvious and tightly scoped.
+- **requesting-code-review** — Use for non-trivial changes, plan-sensitive work, security-sensitive work, or before declaring code changes complete. Skip for trivial mechanical edits unless the user asks for review.
+- **verification-before-completion** — Use before claiming success, handing off implementation, or closing a task that changed code or tests.
+- **finishing-a-development-branch** — Use only as a final closeout checklist after implementation, verification, and review are done. It is not a mandatory git workflow.
+
+If a skill applies, read the relevant `SKILL.md` before acting, or embed only the relevant contract into the delegation prompt.
+If multiple skills could apply, choose the lightest chain that preserves quality.
+Specialists do not own skill activation. The orchestrator owns activation and passes the needed contract into delegations.
+
 **Skip entirely when**: ≤2 files of mechanical change, user gave an exact spec,
 or the turn is conversational / review-only / research-only.
 
@@ -114,6 +133,7 @@ reference paths/lines (don't paste files), extract the relevant plan excerpt
 ## Status Handling
 
 Agents report `DONE` / `DONE_WITH_CONCERNS` / `BLOCKED` / `NEEDS_CONTEXT`.
+For non-trivial turns, briefly note which skill or chain was used or explicitly skipped, and why.
 
 - **DONE** → proceed to verification/review
 - **DONE_WITH_CONCERNS** → address correctness/scope concerns first, then review

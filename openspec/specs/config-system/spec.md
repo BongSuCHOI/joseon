@@ -15,8 +15,8 @@
 - **THEN** designer 에이전트의 temperature가 0.9로 오버라이드됨
 
 #### Scenario: Override agent model
-- **WHEN** config 파일에 `{"agents": {"builder": {"model": "claude-sonnet"}}}`가 설정됨
-- **THEN** builder 에이전트의 model이 "claude-sonnet"으로 오버라이드됨
+- **WHEN** config 파일에 `{"agents": {"frontend": {"model": "claude-sonnet"}}}`가 설정됨
+- **THEN** frontend 에이전트의 model이 "claude-sonnet"으로 오버라이드됨
 
 #### Scenario: Override agent hidden
 - **WHEN** config 파일에 `{"agents": {"explorer": {"hidden": true}}}`가 설정됨
@@ -48,8 +48,8 @@
 글로벌 설정(`~/.config/opencode/harness.jsonc`)을 먼저 로드하고, 프로젝트 설정(`<project>/.opencode/harness.jsonc`)을 deep-merge하여 프로젝트 설정이 우선한다.
 
 #### Scenario: Project overrides global
-- **WHEN** 글로벌에 `{"agents": {"builder": {"temperature": 0.2}}}`가 있고 프로젝트에 `{"agents": {"builder": {"temperature": 0.05}}}`가 있음
-- **THEN** builder의 temperature는 0.05가 됨
+- **WHEN** 글로벌에 `{"agents": {"frontend": {"temperature": 0.2}}}`가 있고 프로젝트에 `{"agents": {"frontend": {"temperature": 0.05}}}`가 있음
+- **THEN** frontend의 temperature는 0.05가 됨
 
 #### Scenario: No config files returns defaults
 - **WHEN** 글로벌과 프로젝트 모두 config 파일이 없음

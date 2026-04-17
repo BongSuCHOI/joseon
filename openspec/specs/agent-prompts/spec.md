@@ -1,34 +1,22 @@
 ## ADDED Requirements
 
 ### Requirement: Orchestrator prompt
-The orchestrator system prompt SHALL define it as the primary entry point for all requests. It SHALL route large-scale work to @builder, handle small tasks directly or delegate to independent subagents, and NOT engage in Phase management.
+The orchestrator system prompt SHALL define it as the primary entry point for all requests. It SHALL handle conversational or trivial work directly, route larger tasks to specialist subagents, and NOT engage in Phase management.
 
 #### Scenario: Orchestrator handles a question
 - **WHEN** user asks "explain this file"
 - **THEN** orchestrator SHALL answer directly without Phase involvement
 
-#### Scenario: Orchestrator delegates to builder
+#### Scenario: Orchestrator delegates to specialists
 - **WHEN** user requests a large implementation task
-- **THEN** orchestrator SHALL delegate to @builder via Task tool with context
+- **THEN** orchestrator SHALL delegate to the appropriate specialist subagent via Task tool with context
 
 #### Scenario: Orchestrator delegates to independent subagent
 - **WHEN** user requests a small bug fix
-- **THEN** orchestrator MAY delegate directly to @coder or handle itself without @builder
+- **THEN** orchestrator MAY delegate directly to @coder or handle itself without phase-managed routing
 
-### Requirement: Builder PM prompt
-The @builder system prompt SHALL define it as Phase PM that manages Phase 1-5 workflow, distributes work to subagents, resets Phase on completion, and reports back to Orchestrator. It SHALL NOT engage in general conversation.
-
-#### Scenario: Builder manages Phase workflow
-- **WHEN** @builder receives a delegated task
-- **THEN** it SHALL start Phase 1 (planning) and progress through phases using phase-manager
-
-#### Scenario: Builder resets Phase on completion
-- **WHEN** @builder completes Phase 5
-- **THEN** it SHALL call resetPhase() and report completion to Orchestrator
-
-#### Scenario: Builder detects incomplete phase
-- **WHEN** @builder is invoked and an incomplete phase exists
-- **THEN** it SHALL ask the user whether to resume or restart
+### Requirement: Specialist prompts
+Each specialist prompt SHALL define a focused role aligned with the current active roster: frontend, backend, tester, reviewer, designer, explorer, librarian, coder, advisor.
 
 ### Requirement: Subagent prompts
 Each subagent SHALL have a focused system prompt defining its role, constraints, and output format.
@@ -52,6 +40,22 @@ Each subagent SHALL have a focused system prompt defining its role, constraints,
 #### Scenario: Designer agent prompt
 - **WHEN** designer agent is invoked
 - **THEN** its prompt SHALL define it as UI/UX design specialist with creative freedom (temperature 0.7)
+
+#### Scenario: Coder agent prompt
+- **WHEN** coder agent is invoked
+- **THEN** its prompt SHALL define it as a fast mechanical execution specialist
+
+#### Scenario: Explorer agent prompt
+- **WHEN** explorer agent is invoked
+- **THEN** its prompt SHALL define it as a read-only internal codebase search specialist
+
+#### Scenario: Librarian agent prompt
+- **WHEN** librarian agent is invoked
+- **THEN** its prompt SHALL define it as a read-only external documentation research specialist
+
+#### Scenario: Advisor agent prompt
+- **WHEN** advisor agent is invoked
+- **THEN** its prompt SHALL define it as a read-only strategic advisor for architecture and debugging
 
 ### Requirement: Prompt loading from files
 Agent prompts SHALL be loaded from `src/agents/prompts/{agent-name}.md` files. The agent construction logic in `src/agents/agents.ts` SHALL read these files and embed them in agent config.

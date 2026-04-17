@@ -92,38 +92,54 @@ export default {
       }
       const agentMap = opencodeConfig.agent as Record<string, unknown>;
       for (const agent of agents) {
-        if (!agentMap[agent.name]) {
-          const mergedPermission = { ...agent.permission };
+        const mergedPermission = { ...agent.permission };
 
-          const overrides = agentOverrides[agent.name];
-          const mcpPerms = buildMcpPermissions(overrides?.mcps, allMcpNames);
-          for (const [key, value] of Object.entries(mcpPerms)) {
-            if (mergedPermission[key] === undefined) {
-              mergedPermission[key] = value;
-            }
+        const overrides = agentOverrides[agent.name];
+        const mcpPerms = buildMcpPermissions(overrides?.mcps, allMcpNames);
+        for (const [key, value] of Object.entries(mcpPerms)) {
+          if (mergedPermission[key] === undefined) {
+            mergedPermission[key] = value;
           }
-
-          const skillPerms = buildSkillPermissions(overrides?.skills, allSkillNames);
-          for (const [key, value] of Object.entries(skillPerms)) {
-            if (mergedPermission[key] === undefined) {
-              mergedPermission[key] = value;
-            }
-          }
-
-          const toolPerms = buildToolPermissions(overrides?.deny_tools);
-          for (const [key, value] of Object.entries(toolPerms)) {
-            if (mergedPermission[key] === undefined) {
-              mergedPermission[key] = value;
-            }
-          }
-
-          const { config: agentConfig, _modelArray, _fallbackChain, ...rest } = agent;
-          agentMap[agent.name] = {
-            ...rest,
-            ...agentConfig,
-            permission: mergedPermission,
-          };
         }
+
+        const skillPerms = buildSkillPermissions(overrides?.skills, allSkillNames);
+        for (const [key, value] of Object.entries(skillPerms)) {
+          if (mergedPermission[key] === undefined) {
+            mergedPermission[key] = value;
+          }
+        }
+
+        const toolPerms = buildToolPermissions(overrides?.deny_tools);
+        for (const [key, value] of Object.entries(toolPerms)) {
+          if (mergedPermission[key] === undefined) {
+            mergedPermission[key] = value;
+          }
+        }
+
+        const { config: agentConfig, _modelArray, _fallbackChain, ...rest } = agent;
+        const pluginAgent = {
+          ...rest,
+          ...agentConfig,
+          permission: mergedPermission,
+        };
+        const existingAgent = agentMap[agent.name];
+        if (!existingAgent || typeof existingAgent !== 'object') {
+          agentMap[agent.name] = pluginAgent;
+          continue;
+        }
+
+        const existingRecord = existingAgent as Record<string, unknown>;
+        const existingPermission = existingRecord.permission && typeof existingRecord.permission === 'object'
+          ? existingRecord.permission as Record<string, string>
+          : {};
+        agentMap[agent.name] = {
+          ...pluginAgent,
+          ...existingRecord,
+          permission: {
+            ...mergedPermission,
+            ...existingPermission,
+          },
+        };
       }
 
       if (!opencodeConfig.default_agent) {

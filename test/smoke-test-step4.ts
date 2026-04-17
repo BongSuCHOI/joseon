@@ -12,10 +12,12 @@ import { createAgents } from '../src/agents/agents.js';
 import { SubagentDepthTracker } from '../src/orchestrator/subagent-depth.js';
 import plugin from '../src/index.js';
 import { HARNESS_DIR } from '../src/shared/index.js';
+import { createDelegateTaskRetryHook } from '../src/hooks/delegate-task-retry.js';
 import { filterAvailableSkillsBlock } from '../src/hooks/filter-available-skills.js';
 import { createForegroundFallbackController, isRetryableModelFailure } from '../src/hooks/foreground-fallback.js';
 import { createFilterAvailableSkillsHook } from '../src/hooks/filter-available-skills.js';
 import { createForegroundFallbackHook } from '../src/hooks/foreground-fallback.js';
+import { createPhaseReminderHook } from '../src/hooks/phase-reminder.js';
 
 let passed = 0;
 let failed = 0;
@@ -193,10 +195,10 @@ try {
     // ============================================================
     console.log('\n--- 4. Agent Registration Integration ---\n');
 
-    // 4-1. createAgents() 호출 → 11개 에이전트
-    console.log('[4-1] createAgents() — 11개 에이전트 반환');
+    // 4-1. createAgents() 호출 → 10개 에이전트
+    console.log('[4-1] createAgents() — 10개 에이전트 반환');
     const agents = createAgents();
-    assert(agents.length === 11, `에이전트 11개 (실제: ${agents.length})`);
+    assert(agents.length === 10, `에이전트 10개 (실제: ${agents.length})`);
 
     // 4-2. 필수 필드 검증
     console.log('\n[4-2] 필수 필드 검증');
@@ -210,7 +212,7 @@ try {
 
     // 4-3. 에이전트 이름 검증
     console.log('\n[4-3] 에이전트 이름 검증');
-    const expectedNames = ['orchestrator', 'builder', 'frontend', 'backend', 'tester', 'reviewer', 'designer', 'explorer', 'librarian', 'coder', 'advisor'];
+    const expectedNames = ['orchestrator', 'frontend', 'backend', 'tester', 'reviewer', 'designer', 'explorer', 'librarian', 'coder', 'advisor'];
     const actualNames = agents.map(a => a.name);
     for (const expected of expectedNames) {
         assert(actualNames.includes(expected), `에이전트 "${expected}" 존재`);
@@ -329,9 +331,13 @@ try {
     console.log('[4C-1] createAgents — permission 필드 구조 검증');
     const permAgents = createAgents();
     const permReviewer = permAgents.find(a => a.name === 'reviewer')!;
-    assert(permReviewer.permission?.file_edit === 'deny', 'reviewer: file_edit === deny (기존 permission 유지)');
+    assert(permReviewer.permission?.file_edit === 'deny', 'reviewer: file_edit === deny');
     const permAdvisor = permAgents.find(a => a.name === 'advisor')!;
-    assert(permAdvisor.permission?.file_edit === 'deny', 'advisor: file_edit === deny (기존 permission 유지)');
+    assert(permAdvisor.permission?.file_edit === 'deny', 'advisor: file_edit === deny');
+    const permExplorer = permAgents.find(a => a.name === 'explorer')!;
+    assert(permExplorer.permission?.file_edit === 'deny', 'explorer: file_edit === deny');
+    const permLibrarian = permAgents.find(a => a.name === 'librarian')!;
+    assert(permLibrarian.permission?.file_edit === 'deny', 'librarian: file_edit === deny');
     const permOrch = permAgents.find(a => a.name === 'orchestrator')!;
     assert(permOrch.permission === undefined, 'orchestrator: permission 없음 (기본값)');
 
@@ -339,9 +345,20 @@ try {
     console.log('\n[4C-2] config callback — agent 등록 + permission 보존');
     const serverResult = await plugin.server({ project: {}, client: {}, $: {}, directory: process.cwd(), worktree: process.cwd() }) as { config: (config: Record<string, unknown>) => Promise<void> };
     assert(typeof serverResult.config === 'function', 'config가 함수');
-    const cbConfig: Record<string, unknown> = {};
+    const cbConfig: Record<string, unknown> = {
+        agent: {
+            orchestrator: {
+                model: 'custom-orchestrator-model',
+                customFlag: true,
+            },
+        },
+    };
     await serverResult.config(cbConfig);
     const cbAgentMap = cbConfig.agent as Record<string, any>;
+    assert(cbAgentMap.orchestrator.model === 'custom-orchestrator-model', 'config callback: 기존 orchestrator model override 유지');
+    assert(cbAgentMap.orchestrator.customFlag === true, 'config callback: 기존 orchestrator 사용자 필드 유지');
+    assert(typeof cbAgentMap.orchestrator.prompt === 'string' && cbAgentMap.orchestrator.prompt.length > 0, 'config callback: 기존 orchestrator에도 기본 prompt 병합');
+    assert(cbAgentMap.orchestrator.mode === 'primary', 'config callback: 기존 orchestrator에도 기본 mode 병합');
     assert(cbAgentMap.reviewer.permission?.file_edit === 'deny', 'config callback: reviewer file_edit deny 보존');
     assert(cbAgentMap.advisor.permission?.file_edit === 'deny', 'config callback: advisor file_edit deny 보존');
     assert(cbConfig.default_agent === 'orchestrator', 'default_agent === orchestrator');
@@ -370,9 +387,9 @@ try {
     // designer: deny_tools: ["bash"] (file_edit 없음)
     assert(denyAgentMap.designer?.permission?.bash === 'deny', 'deny_tools: designer bash === deny');
     assert(denyAgentMap.designer?.permission?.write === undefined, 'deny_tools: designer write 제한 없음');
-    // builder: deny_tools 없음 → 아무 tool permission 없어야 함
-    assert(denyAgentMap.builder?.permission?.write === undefined, 'deny_tools: builder write 제한 없음');
-    assert(denyAgentMap.builder?.permission?.bash === undefined, 'deny_tools: builder bash 제한 없음');
+    // coder: deny_tools 없음 → 아무 tool permission 없어야 함
+    assert(denyAgentMap.coder?.permission?.write === undefined, 'deny_tools: coder write 제한 없음');
+    assert(denyAgentMap.coder?.permission?.bash === undefined, 'deny_tools: coder bash 제한 없음');
 
     // 5-1. 플러그인 id 검증
     console.log('[5-1] 플러그인 id');
@@ -388,7 +405,7 @@ try {
     await serverResult.config(testConfig);
     const agentMap = testConfig.agent as Record<string, unknown>;
     assert(agentMap !== undefined && agentMap !== null, 'agent 객체가 설정됨');
-    assert(typeof agentMap.builder === 'object', 'builder 에이전트 등록됨');
+    assert(typeof agentMap.tester === 'object', 'tester 에이전트 등록됨');
     assert(typeof agentMap.designer === 'object', 'designer 에이전트 등록됨');
     assert(typeof agentMap.coder === 'object', 'coder 에이전트 등록됨');
     assert(typeof agentMap.advisor === 'object', 'advisor 에이전트 등록됨');
@@ -398,8 +415,31 @@ try {
     // ============================================================
     console.log('\n--- 5B. Stability Follow-up Hooks ---\n');
 
-    // 5B-1. skill catalog filtering at prompt layer
-    console.log('[5B-1] skill catalog filtering');
+    // 5B-1. phase reminder targets orchestrator only
+    console.log('[5B-1] orchestrator phase reminder');
+    const phaseReminderHook = createPhaseReminderHook();
+    const phaseMessages = {
+        messages: [
+            { info: { role: 'assistant', agent: 'frontend' }, parts: [{ type: 'text', text: 'frontend work' }] },
+            { info: { role: 'assistant', agent: 'orchestrator' }, parts: [{ type: 'text', text: 'route this task' }] },
+        ],
+    };
+    await phaseReminderHook['experimental.chat.messages.transform']({} as Record<string, never>, phaseMessages as any);
+    assert(phaseMessages.messages[0].parts.length === 1, 'phase reminder: non-orchestrator message unchanged');
+    assert(phaseMessages.messages[1].parts.some((part: any) => typeof part.text === 'string' && part.text.includes('Orchestrator workflow rules')), 'phase reminder: orchestrator message gets reminder');
+
+    // 5B-2. delegate-task-retry advertises current roster
+    console.log('[5B-2] delegate-task-retry agent guidance');
+    const delegateTaskRetryHook = createDelegateTaskRetryHook();
+    await delegateTaskRetryHook['tool.execute.after']({ tool: 'task' }, { output: 'could not find agent named whatever' } as any);
+    const retrySystem = { system: [] as string[] };
+    await delegateTaskRetryHook['experimental.chat.system.transform']({} as Record<string, never>, retrySystem);
+    const retryGuidance = retrySystem.system.join('\n');
+    assert(retryGuidance.includes('orchestrator') && retryGuidance.includes('advisor'), 'delegate-task-retry: current agent roster included');
+    assert(!retryGuidance.includes('builder'), 'delegate-task-retry: stale builder guidance removed');
+
+    // 5B-3. skill catalog filtering at prompt layer
+    console.log('[5B-3] skill catalog filtering');
     const skillPrompt = [
         'prefix',
         '<available_skills>',
@@ -428,8 +468,8 @@ try {
     const emptyPrompt = filterAvailableSkillsBlock(skillPrompt, undefined, ['frontend', 'backend', 'tester']);
     assert(!emptyPrompt.includes('<skill>'), 'skill filter: empty config removes all skills');
 
-    // 5B-2. foreground fallback state tracks reactive session recovery
-    console.log('[5B-2] foreground fallback state');
+    // 5B-4. foreground fallback state tracks reactive session recovery
+    console.log('[5B-4] foreground fallback state');
     const fallbackWorktree = join(tmpdir(), `step4-fallback-test-${Date.now()}`);
     mkdirSync(fallbackWorktree, { recursive: true });
     const fallbackController = createForegroundFallbackController(fallbackWorktree);
@@ -458,8 +498,8 @@ try {
     rmSync(join(HARNESS_DIR, 'projects', disabledController.projectKey), { recursive: true, force: true });
     rmSync(disabledWorktree, { recursive: true, force: true });
 
-    // 5B-3. foreground fallback reactive session recovery
-    console.log('[5B-3] foreground fallback reactive recovery');
+    // 5B-5. foreground fallback reactive session recovery
+    console.log('[5B-5] foreground fallback reactive recovery');
     const fallbackRecoveryWorktree = join(tmpdir(), `step4-fallback-recovery-${Date.now()}`);
     mkdirSync(fallbackRecoveryWorktree, { recursive: true });
     const fallbackRecoveryController = createForegroundFallbackController(fallbackRecoveryWorktree);

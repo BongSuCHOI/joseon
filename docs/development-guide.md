@@ -41,8 +41,9 @@
 │   ├── orchestrator.ts
 │   ├── phase-manager.ts
 │   ├── error-recovery.ts
-│   └── qa-tracker.ts
-└── agents/               # 11개 에이전트
+│   ├── qa-tracker.ts
+│   └── subagent-depth.ts
+└── agents/               # 10개 에이전트
     ├── agents.ts
     └── prompts/
 ```
@@ -85,15 +86,10 @@ npm publish      # npm 레지스트리에 배포
 # 1. src/에서 수정 후 빌드
 npm run build
 
-# 2. .opencode/plugins/harness/에 복사
-cp -r src/types.ts .opencode/plugins/harness/types.ts
-cp -r src/shared/ .opencode/plugins/harness/shared/
-cp -r src/harness/ .opencode/plugins/harness/harness/
-cp -r src/orchestrator/ .opencode/plugins/harness/orchestrator/
+# 2. 전체 src/를 로컬 플러그인에 동기화
+rsync -av --exclude='__tests__' src/ .opencode/plugins/harness/
 
-# 3. index.ts는 진입점이 다르므로 별도 관리 (이미 .opencode/plugins/harness/index.ts에 있음)
-
-# 4. OpenCode 재시작
+# 3. OpenCode 재시작
 ```
 
 ### 빠른 동기화 스크립트

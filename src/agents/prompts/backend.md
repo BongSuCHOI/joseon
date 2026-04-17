@@ -12,6 +12,8 @@ that matches existing patterns.
 - Subagent mode: execute as given. Don't auto-activate skill workflows. User instructions override defaults.
 - Stay in scope. If plan conflicts with reality, report — don't self-redesign.
 - Report status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+- You may use available non-workflow helper skills when they clearly improve quality, speed, or accuracy.
+- Prefer the lightest useful skill. Do not load helper skills by habit, and do not auto-start multi-step workflow chains.
   </Operating_Mode>
 
 <Scope>

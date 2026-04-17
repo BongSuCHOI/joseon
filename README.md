@@ -95,7 +95,7 @@ SOFT 규칙 생성 (rules/soft/)
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
 | **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow |
 | **phase-manager** | `src/orchestrator/phase-manager.ts` | Phase 상태 파일 관리 + Phase 2.5 gate + PID 세션 락 (Step 4a) |
-| **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 11개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
+| **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
 | **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: session.idle Phase 정리 + 4개 플러그인 통합 진입점 (Step 4D~4f) |
@@ -182,7 +182,7 @@ src/
 │   ├── json-error-recovery.ts    # JSON 파싱 에러 감지 + 수정 프롬프트 주입
 │   ├── post-file-tool-nudge.ts   # 파일 조작 후 위임 넛지
 │   ├── post-read-nudge.ts        # 파일 읽기 후 위임 넛지
-│   ├── phase-reminder.ts         # builder 에이전트 Phase 리마인더
+│   ├── phase-reminder.ts         # orchestrator 워크플로우 리마인더
 │   ├── foreground-fallback.ts    # abort + prompt_async 재프롬프트로 same-session 복구
 │   ├── filter-available-skills.ts # 에이전트별 스킬 노출 필터
 │   └── index.ts                  # createAllHooks() + 핸들러 병합
@@ -199,12 +199,12 @@ src/
 │   ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D~4f)
 │   ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
 │   ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션 (Step 4c)
-│   └── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
+│   ├── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
+│   └── subagent-depth.ts        # 서브에이전트 깊이 추적 + 초과 차단 (B3)
 └── agents/
-    ├── agents.ts                # 11개 에이전트 빌더 + config 오버라이드 적용 (Step 4b)
-    └── prompts/                 # 11개 에이전트 프롬프트
+    ├── agents.ts                # 10개 에이전트 정의 + config 오버라이드 적용 (Step 4b)
+    └── prompts/                 # 10개 에이전트 프롬프트
         ├── orchestrator.md
-        ├── builder.md
         ├── frontend.md
         ├── backend.md
         ├── tester.md
@@ -223,16 +223,15 @@ src/
 | 에이전트 | 권장 모델 | 설명 |
 |----------|-----------|------|
 | orchestrator | glm-5-turbo (빠른 추론) | 판단/라우팅에 최적화. 응답 속도 중요 |
-| builder | glm-5.1 (고품질) | Phase 관리 + 서브에이전트 분배. 정확성 중요 |
 | frontend | glm-4.7 | 프론트엔드 구현 |
 | backend | glm-4.7 | 백엔드 구현 |
 | tester | glm-4.7 | QA 테스트 |
-| coder | glm-4.7 | 기계적 실행 (빠른 타이핑) |
 | reviewer | glm-5.1 (고품질) | 코드 리뷰. 정확한 분석 필요 |
-| advisor | glm-5.1 (고품질) | 아키텍처 자문. 심층 분석 필요 |
 | designer | glm-4.7 (temperature 0.7) | UI/UX 기획. 창의성 필요 |
 | explorer | glm-4.7 | 코드베이스 검색 |
 | librarian | glm-4.7 | 외부 문서 조사 |
+| coder | glm-4.7 | 기계적 실행 (빠른 타이핑) |
+| advisor | glm-5.1 (고품질) | 아키텍처 자문. 심층 분석 필요 |
 
 > **참고:** 모델은 `.opencode/harness.jsonc`에서 자유롭게 변경 가능. FallbackChain(`"model": ["a", "b"]`)은 retryable provider 실패 시 같은 세션에서 다음 모델로 재프롬프트하는 reactive fallback을 지원.
 
@@ -301,9 +300,9 @@ npm run build
             "skills": ["*"],
             "mcps": ["*"]
         },
-        "builder": {
-            "model": "zai-coding-plan/glm-5.1",
-            "skills": ["writing-plans", "subagent-driven-development"]
+        "tester": {
+            "model": "zai-coding-plan/glm-4.7",
+            "skills": ["test-driven-development", "dogfood"]
         },
         "reviewer": {
             "model": "zai-coding-plan/glm-5.1",
@@ -333,7 +332,7 @@ npm run deploy
 ```bash
 opencode
 # orchestrator 에이전트가 기본으로 활성화됩니다.
-# 대규모 작업은 @builder에게 자동 위임됩니다.
+# 대규모 작업은 필요 시 전문 서브에이전트에게 위임됩니다.
 ```
 
 ## 참고

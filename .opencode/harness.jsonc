@@ -68,7 +68,7 @@
             "variant": "medium",
             "skills": ["frontend-design", "ui-ux-pro-max", "excalidraw", "creative-ideation", "popular-web-designs", "agent-browser", "brainstorming"],
             "mcps": [],
-            "deny_tools": ["write", "edit", "patch", "bash"],
+            "deny_tools": ["bash"],
             "hidden": false,
         },
         "explorer": {

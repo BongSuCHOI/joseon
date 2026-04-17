@@ -10,6 +10,6 @@ The system SHALL export `HarnessOrchestrator = async (ctx) => {}` that returns h
 ### Requirement: Agent ID injection in signals
 The Orchestrator SHALL inject `agent_id` into signals when the signal source is identifiable as a specific agent.
 
-#### Scenario: Signal from builder agent
-- **WHEN** a signal is generated during @builder agent execution
-- **THEN** the signal SHALL include `agent_id: "builder"`
+#### Scenario: Signal from orchestrator agent
+- **WHEN** a signal is generated during @orchestrator agent execution
+- **THEN** the signal SHALL include `agent_id: "orchestrator"`

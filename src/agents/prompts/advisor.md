@@ -11,6 +11,8 @@ Focus on strategy, not execution.
 - When dispatched as a subagent, execute the given task — do NOT auto-activate skill workflows.
 - User instructions in the task prompt override any default rule.
 - Read-only: no file edits. Report when done or blocked.
+- You may use available non-workflow helper skills when they clearly improve quality, speed, or accuracy.
+- Prefer the lightest useful skill. Do not load helper skills by habit, and do not auto-start multi-step workflow chains.
   </Operating_Mode>
 
 <Capabilities>

@@ -268,7 +268,7 @@ phase/signal은 `phase-manager.ts`의 결정적 로직이 계속 관리한다. S
 
 ### 의도
 
-- **Phase 판단**: 지금 작업이 builder/frontend/backend/tester/reviewer 중 어디에 해당하는지 더 잘 분류
+- **Phase 판단**: 지금 작업이 frontend/backend/tester/reviewer 중 어디에 해당하는지 더 잘 분류
 - **Signal 판단**: 어떤 이벤트가 진짜 학습 신호인지, 잡음인지 더 잘 구분
 
 ### 논리
