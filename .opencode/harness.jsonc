@@ -5,7 +5,7 @@
 
     "agents": {
         "orchestrator": {
-            "model": "openai/gpt-5.4",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["*"],
@@ -31,7 +31,7 @@
             "hidden": false,
         },
         "frontend": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "medium",
             "skills": ["vercel-react-best-practices", "vercel-composition-patterns", "receiving-code-review", "simplify", "verification-before-completion"],
@@ -39,7 +39,7 @@
             "hidden": false,
         },
         "backend": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["receiving-code-review", "simplify", "verification-before-completion"],
@@ -47,7 +47,7 @@
             "hidden": false,
         },
         "tester": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["test-driven-development", "dogfood", "agent-browser", "simplify", "verification-before-completion"],
@@ -55,7 +55,7 @@
             "hidden": false,
         },
         "coder": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "medium",
             "skills": ["simplify", "receiving-code-review", "verification-before-completion"],
@@ -72,7 +72,7 @@
             "hidden": false,
         },
         "explorer": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5-turbo",
             "temperature": 0.1,
             "variant": "medium",
             "skills": [],
@@ -81,7 +81,7 @@
             "hidden": false,
         },
         "librarian": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5-turbo",
             "temperature": 0.1,
             "variant": "medium",
             "skills": [],
@@ -92,13 +92,29 @@
     },
 
     "harness": {
-        "soft_to_hard_threshold": 2,
-        "escalation_threshold": 3,
-        "max_recovery_stages": 5,
-        "history_max_bytes": 1048576,
-        "regex_max_length": 10000,
-        "scaffold_match_ratio": 0.6,
-        "search_max_results": 10,
+        // ─── Core ───
+        "soft_to_hard_threshold": 2, // SOFT→HARD 승격: 위반 N회 시 자동 승격
+        "escalation_threshold": 3, // 에러 복구 에스컬레이션 단계
+        "max_recovery_stages": 5, // 에러 복구 최대 단계
+        "max_subagent_depth": 3, // 서브에이전트 중첩 깊이 제한
+
+        // ─── Rule Quality ───
+        "regex_max_length": 10000, // 정규식 패턴 최대 길이 (catastrophic backtracking 방지)
+        "scaffold_match_ratio": 0.6, // scaffold 파일 매칭 비율
+        "candidate_threshold": 3, // 실수 패턴 candidate 생성 임계값 (동일 패턴 N회 반복 시)
+
+        // ─── Storage ───
+        "history_max_bytes": 1048576, // history.jsonl 최대 크기 (bytes, 초과 시 rotate)
+        "search_max_results": 10, // memory search 최대 결과 수
+
+        // ─── Shadow / Guarded Features (all default-off) ───
+        "ack_guard_enabled": false, // multi-check ack acceptance (rule_written + rule_valid + not_prune_candidate)
+        "semantic_compacting_enabled": false, // compacting 시 의미 기반 규칙 필터링
+        "canary_enabled": false, // phase/signal canary — deterministic vs metadata 불일치 관찰
+        "compacting_canary_enabled": false, // compacting canary — baseline vs semantic 선택 차이 관찰
+        "prune_guard_enabled": false, // 비활성 규칙 자동 삭제 후보 기록
+        "cross_project_promotion_guard_enabled": false, // 크로스 프로젝트 규칙 승격 후보 기록
+        "auto_update_checker_enabled": false, // 세션 시작 시 npm 버전 체크 (warn-only)
     },
 
     // FallbackChain — 다중 모델 환경에서 rate limit 시 자동 전환
