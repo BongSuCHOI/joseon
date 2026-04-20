@@ -36,6 +36,7 @@ export interface HarnessSettings {
     cross_project_promotion_guard_enabled?: boolean;
     auto_update_checker_enabled?: boolean;
     candidate_threshold?: number;
+    canary_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -59,6 +60,7 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     cross_project_promotion_guard_enabled: false,
     auto_update_checker_enabled: false,
     candidate_threshold: 3,
+    canary_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

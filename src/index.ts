@@ -60,7 +60,7 @@ export default {
     const fallbackEnabled = harnessConfig?.fallback?.enabled ?? true;
     const foregroundFallback = createForegroundFallbackController(worktree, fallbackEnabled);
     const sessionAgents = new Map<string, string>();
-    const observerHooks = await HarnessObserver(ctx);
+    const observerHooks = await HarnessObserver({ worktree, config: harnessConfig });
     const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);
     const improverHooks = await HarnessImprover(ctx, harnessConfig);
     const orchestratorHooks = await HarnessOrchestrator(ctx);

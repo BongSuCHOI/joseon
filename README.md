@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5e 구현/검증 완료 (smoke 147/147 통과) |
+| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5f 구현/검증 완료 (smoke 77/77 통과) |
 
 ### 핵심 원칙
 
@@ -94,6 +94,7 @@ SOFT 규칙 생성 (rules/soft/)
 | **observer** | `src/harness/observer.ts` | L1 도구 실행 로깅 + L2 에러/불만 signal 생성 |
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
 | **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping |
+| **canary** | `src/harness/canary.ts` | Step 5f: metadata-based phase/signal canary evaluation (default-off, `canary_enabled`, mismatch detection, aggregation report) |
 | **phase-manager** | `src/orchestrator/phase-manager.ts` | Phase 상태 파일 관리 + Phase 2.5 gate + PID 세션 락 (Step 4a) |
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
@@ -133,6 +134,7 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── compacting-relevance-shadow.jsonl # reduced-safe 5b compacting shadow 로그
 │   │   ├── rule-prune-candidates.jsonl # Step 5c prune candidate log
 │   │   ├── mistake-pattern-candidates.jsonl # Step 5e mistake pattern candidate log
+│   │   ├── canary-mismatches.jsonl # Step 5f canary mismatch log (default-off)
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -190,6 +192,18 @@ npm run deploy
 }
 ```
 
+### Step 5f phase/signal canary 설정
+
+`canary_enabled`는 metadata-based canary evaluation 활성화 여부다. 기본값은 `false`. 켜면 저신뢰도 phase/signal 판정 상황에서 메타데이터 기반 평가를 수행하고, deterministic과 불일치하면 `canary-mismatches.jsonl`에 기록한다. 실제 phase/signal 판정은 변경하지 않는다.
+
+```jsonc
+{
+  "harness": {
+    "canary_enabled": false
+  }
+}
+```
+
 자세한 개발/테스트 절차는 [`docs/development-guide.md`](docs/development-guide.md)를 참조.
 
 ## 프로젝트 구조
@@ -220,7 +234,8 @@ src/
 ├── harness/
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
-│   └── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
+│   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
+│   └── canary.ts                # Step 5f: metadata-based phase/signal canary evaluation
 ├── orchestrator/
 │   ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D~4f)
 │   ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)

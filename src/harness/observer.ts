@@ -3,7 +3,9 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, logEvent, generateId, logger, appendJsonlRecord } from '../shared/index.js';
 import { getHarnessSettings } from '../config/index.js';
+import type { HarnessConfig } from '../config/index.js';
 import { SubagentDepthTracker } from '../orchestrator/subagent-depth.js';
+import { runCanaryEvaluation } from './canary.js';
 import type { Signal, ShadowDecisionRecord } from '../types.js';
 
 function emitSignal(signal: Record<string, unknown>): void {
@@ -25,6 +27,8 @@ function appendSignalShadowRecord(
     trigger: string,
     context: Record<string, unknown>,
     sessionID?: string,
+    config?: HarnessConfig,
+    worktree?: string,
 ): void {
     const record: ShadowDecisionRecord = {
         id: generateId(),
@@ -47,6 +51,15 @@ function appendSignalShadowRecord(
     };
 
     appendJsonlRecord(phaseSignalShadowPath(projectKey), record as unknown as Record<string, unknown>);
+
+    // Step 5f: Run canary evaluation if both config and worktree are provided
+    if (config && worktree) {
+        try {
+            runCanaryEvaluation(worktree, record, config);
+        } catch {
+            // canary failure must not affect deterministic behavior
+        }
+    }
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -120,12 +133,12 @@ function extractErrorMessage(err: unknown): string {
     return str.slice(0, 200);
 }
 
-export const HarnessObserver = async (ctx: { worktree: string }) => {
+export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessConfig }) => {
     ensureHarnessDirs();
 
     const projectKey = getProjectKey(ctx.worktree);
     const errorCounts = new Map<string, number>();
-    const harnessSettings = getHarnessSettings();
+    const harnessSettings = getHarnessSettings(ctx.config);
     const depthTracker = new SubagentDepthTracker(harnessSettings.max_subagent_depth);
 
     return {
@@ -195,7 +208,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                 appendSignalShadowRecord(projectKey, 'error_repeat', shouldEmit, 'session.error', {
                     error: errorInfo,
                     repeat_count: count,
-                }, sessionID);
+                }, sessionID, ctx.config, ctx.worktree);
 
                 if (shouldEmit) {
                     emitSignal({
@@ -228,7 +241,7 @@ export const HarnessObserver = async (ctx: { worktree: string }) => {
                         appendSignalShadowRecord(projectKey, 'user_feedback', shouldEmit, 'message.part.updated', {
                             matched_keywords: found,
                             message_id: part.messageID,
-                        });
+                        }, undefined, ctx.config, ctx.worktree);
 
                         if (shouldEmit) {
                             emitSignal({

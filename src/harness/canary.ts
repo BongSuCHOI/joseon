@@ -1,0 +1,344 @@
+// src/harness/canary.ts — Step 5f: Metadata-based canary evaluation for
+// low-confidence deterministic phase/signal decisions.
+// All canary functions are isolated here to avoid growing improver.ts further
+// and to keep dependency graphs clean (no circular deps).
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import type { ShadowDecisionRecord, CanaryMismatchRecord } from '../types.js';
+import type { HarnessConfig } from '../config/index.js';
+import { getHarnessSettings } from '../config/index.js';
+import { HARNESS_DIR, getProjectKey, generateId, appendJsonlRecord, logger } from '../shared/index.js';
+
+// ─── Paths ─────────────────────────────────────────────
+
+function phaseSignalShadowPath(worktree: string): string {
+    return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'phase-signal-shadow.jsonl');
+}
+
+export function getCanaryMismatchesPath(worktree: string): string {
+    return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'canary-mismatches.jsonl');
+}
+
+// ─── 2.1 Shadow record reader ──────────────────────────
+
+export function readRecentShadowRecords(worktree: string, count: number): ShadowDecisionRecord[] {
+    const filePath = phaseSignalShadowPath(worktree);
+    if (!existsSync(filePath)) return [];
+
+    try {
+        const raw = readFileSync(filePath, 'utf-8').trim();
+        if (!raw) return [];
+
+        const lines = raw.split('\n').filter(Boolean);
+        const records: ShadowDecisionRecord[] = [];
+        // Read from the end (newest first)
+        const start = Math.max(0, lines.length - count);
+        for (let i = lines.length - 1; i >= start; i--) {
+            try {
+                records.push(JSON.parse(lines[i]) as ShadowDecisionRecord);
+            } catch {
+                // skip malformed lines
+            }
+        }
+        return records;
+    } catch {
+        return [];
+    }
+}
+
+// ─── 3.1 Low-confidence proxy detection ────────────────
+
+export function isLowConfidenceProxy(record: ShadowDecisionRecord): string | null {
+    if (record.kind === 'phase') {
+        const ctx = record.context as Record<string, unknown> | undefined;
+        if (ctx?.transition_status === 'blocked') return 'phase_blocked';
+        if ((record.deterministic.phase_from ?? 0) > (record.deterministic.phase_to ?? 0)) return 'phase_regression';
+    }
+
+    if (record.kind === 'signal') {
+        if (record.deterministic.signal_type === 'user_feedback') return 'user_feedback';
+        if (record.deterministic.signal_type === 'error_repeat') {
+            const ctx = record.context as Record<string, unknown> | undefined;
+            if (ctx?.repeat_count === 2) return 'error_pre_alert';
+        }
+    }
+
+    return null;
+}
+
+// ─── 4.1 Phase hint computation ────────────────────────
+
+export function computePhaseHint(record: ShadowDecisionRecord): string {
+    const ctx = record.context as Record<string, unknown> | undefined;
+    if (ctx?.transition_status === 'blocked') return 'blocked_gate';
+    if ((record.deterministic.phase_from ?? 0) > (record.deterministic.phase_to ?? 0)) return 'regression';
+    if ((record.deterministic.phase_from ?? 0) < (record.deterministic.phase_to ?? 0)) return 'forward';
+    return 'same';
+}
+
+// ─── 4.2 Signal relevance computation ──────────────────
+
+export function computeSignalRelevance(record: ShadowDecisionRecord): string {
+    const signalType = record.deterministic.signal_type;
+
+    if (signalType === 'user_feedback') {
+        const ctx = record.context as Record<string, unknown> | undefined;
+        const matchedKeywords = (ctx?.matched_keywords as unknown[]) ?? [];
+        if (matchedKeywords.length >= 2) return 'high';
+        if (matchedKeywords.length === 1) return 'medium';
+        return 'low';
+    }
+
+    if (signalType === 'error_repeat') {
+        const ctx = record.context as Record<string, unknown> | undefined;
+        const repeatCount = (ctx?.repeat_count as number) ?? 0;
+        if (repeatCount >= 2) return 'high';
+        return 'low';
+    }
+
+    return 'low';
+}
+
+// ─── 4.3 Confidence computation ────────────────────────
+
+export function computeConfidence(proxyType: string, recentRecords: ShadowDecisionRecord[]): number {
+    let frequency = 0;
+    for (const r of recentRecords) {
+        if (isLowConfidenceProxy(r) === proxyType) {
+            frequency++;
+        }
+    }
+
+    if (frequency >= 5) return 0.3;
+    if (frequency < 3) return 0.7;
+    return 0.5;
+}
+
+// ─── 4.4 Evaluate canary ───────────────────────────────
+
+export function evaluateCanary(
+    record: ShadowDecisionRecord,
+    recentRecords: ShadowDecisionRecord[],
+    config?: HarnessConfig,
+): { phase_hint?: string; signal_relevance?: string; confidence: number; reason: string } | null {
+    const settings = getHarnessSettings(config);
+    if (!settings.canary_enabled) return null;
+
+    const proxyType = isLowConfidenceProxy(record);
+    if (!proxyType) return null;
+
+    const confidence = computeConfidence(proxyType, recentRecords);
+
+    if (record.kind === 'phase') {
+        const phaseHint = computePhaseHint(record);
+        return {
+            phase_hint: phaseHint,
+            confidence,
+            reason: `proxy=${proxyType} hint=${phaseHint} freq_based_confidence=${confidence}`,
+        };
+    }
+
+    if (record.kind === 'signal') {
+        const signalRelevance = computeSignalRelevance(record);
+        return {
+            signal_relevance: signalRelevance,
+            confidence,
+            reason: `proxy=${proxyType} relevance=${signalRelevance} freq_based_confidence=${confidence}`,
+        };
+    }
+
+    return null;
+}
+
+// ─── 5.3 Mismatch path (exported above) ────────────────
+
+// ─── 5.4 Append mismatch record ────────────────────────
+
+export function appendMismatchRecord(
+    worktree: string,
+    record: ShadowDecisionRecord,
+    canaryResult: NonNullable<ReturnType<typeof evaluateCanary>>,
+): void {
+    let isMismatch = false;
+
+    // Phase mismatch: blocked transition AND canary is confident AND confirms blocked
+    if (record.kind === 'phase') {
+        const ctx = record.context as Record<string, unknown> | undefined;
+        if (ctx?.transition_status === 'blocked' && canaryResult.confidence >= 0.7 && canaryResult.phase_hint === 'blocked_gate') {
+            isMismatch = true;
+        }
+    }
+
+    // Signal mismatch: NOT emitted but canary says high/medium relevance with confidence
+    if (record.kind === 'signal') {
+        if (!record.deterministic.emitted && (canaryResult.signal_relevance === 'high' || canaryResult.signal_relevance === 'medium') && canaryResult.confidence >= 0.7) {
+            isMismatch = true;
+        }
+    }
+
+    if (!isMismatch) return;
+
+    const mismatch: CanaryMismatchRecord = {
+        id: generateId(),
+        timestamp: new Date().toISOString(),
+        project_key: getProjectKey(worktree),
+        proxy_type: isLowConfidenceProxy(record) as CanaryMismatchRecord['proxy_type'],
+        deterministic: {
+            decision: record.kind === 'phase'
+                ? `phase ${record.deterministic.phase_from}->${record.deterministic.phase_to}`
+                : `signal ${record.deterministic.signal_type} emitted=${record.deterministic.emitted}`,
+            detail: JSON.stringify(record.deterministic),
+        },
+        canary: {
+            phase_hint: canaryResult.phase_hint,
+            signal_relevance: canaryResult.signal_relevance,
+            confidence: canaryResult.confidence,
+            reason: canaryResult.reason,
+        },
+        shadow_record_id: record.id,
+    };
+
+    const mismatchesPath = getCanaryMismatchesPath(worktree);
+    appendJsonlRecord(mismatchesPath, mismatch as unknown as Record<string, unknown>);
+
+    logger.info('canary', 'mismatch_detected', {
+        proxy_type: mismatch.proxy_type,
+        confidence: canaryResult.confidence,
+        shadow_id: record.id,
+    });
+}
+
+// ─── 5.1/5.2 Integration helper ────────────────────────
+
+/**
+ * Run canary evaluation on a shadow record and, if applicable,
+ * append a mismatch record. Called from phase-manager and observer
+ * after their initial shadow append.
+ *
+ * Returns the updated shadow record with populated shadow block,
+ * or null if canary did not run.
+ */
+export function runCanaryEvaluation(
+    worktree: string,
+    record: ShadowDecisionRecord,
+    config?: HarnessConfig,
+): ShadowDecisionRecord | null {
+    const recentRecords = readRecentShadowRecords(worktree, 50);
+    const canaryResult = evaluateCanary(record, recentRecords, config);
+    if (!canaryResult) return null;
+
+    // Populate shadow block on the record
+    const evaluated: ShadowDecisionRecord = {
+        ...record,
+        shadow: {
+            status: 'low_confidence',
+            phase_hint: canaryResult.phase_hint ? Number(canaryResult.phase_hint) || undefined : undefined,
+            signal_relevance: canaryResult.signal_relevance === 'high' ? 'relevant' : canaryResult.signal_relevance === 'medium' ? 'relevant' : canaryResult.signal_relevance === 'low' ? 'irrelevant' : undefined,
+            confidence: canaryResult.confidence,
+            reason: canaryResult.reason,
+        },
+    };
+
+    // Append the evaluated shadow record
+    const shadowPath = phaseSignalShadowPath(worktree);
+    appendJsonlRecord(shadowPath, evaluated as unknown as Record<string, unknown>);
+
+    // Check and record mismatches
+    appendMismatchRecord(worktree, record, canaryResult);
+
+    return evaluated;
+}
+
+// ─── 6.1/6.2 Canary aggregation report ────────────────
+
+export interface CanaryReport {
+    total: number;
+    mismatches: number;
+    mismatch_rate: number;
+    breakdown: Record<string, { total: number; mismatches: number }>;
+    promotion_candidates: string[];
+}
+
+export function generateCanaryReport(worktree: string): CanaryReport {
+    const mismatchesPath = getCanaryMismatchesPath(worktree);
+    const shadowPath = phaseSignalShadowPath(worktree);
+
+    // Count canary evaluations from shadow records
+    let totalCanaryEvals = 0;
+    const canaryEvalByProxy: Record<string, number> = {};
+
+    if (existsSync(shadowPath)) {
+        try {
+            const raw = readFileSync(shadowPath, 'utf-8').trim();
+            if (raw) {
+                const lines = raw.split('\n').filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const r = JSON.parse(line) as ShadowDecisionRecord;
+                        if (r.shadow?.status === 'low_confidence') {
+                            totalCanaryEvals++;
+                            const proxy = isLowConfidenceProxy(r);
+                            if (proxy) {
+                                canaryEvalByProxy[proxy] = (canaryEvalByProxy[proxy] ?? 0) + 1;
+                            }
+                        }
+                    } catch {
+                        // skip malformed
+                    }
+                }
+            }
+        } catch {
+            // read failure — report zeros
+        }
+    }
+
+    // Count mismatches
+    let totalMismatches = 0;
+    const mismatchByProxy: Record<string, number> = {};
+
+    if (existsSync(mismatchesPath)) {
+        try {
+            const raw = readFileSync(mismatchesPath, 'utf-8').trim();
+            if (raw) {
+                const lines = raw.split('\n').filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const m = JSON.parse(line) as CanaryMismatchRecord;
+                        totalMismatches++;
+                        mismatchByProxy[m.proxy_type] = (mismatchByProxy[m.proxy_type] ?? 0) + 1;
+                    } catch {
+                        // skip malformed
+                    }
+                }
+            }
+        } catch {
+            // read failure
+        }
+    }
+
+    // Build breakdown
+    const allProxyTypes = new Set([...Object.keys(canaryEvalByProxy), ...Object.keys(mismatchByProxy)]);
+    const breakdown: Record<string, { total: number; mismatches: number }> = {};
+    for (const proxy of allProxyTypes) {
+        breakdown[proxy] = {
+            total: canaryEvalByProxy[proxy] ?? 0,
+            mismatches: mismatchByProxy[proxy] ?? 0,
+        };
+    }
+
+    // Promotion candidates: proxy types where mismatch rate > 30% (of total evals for that type)
+    const promotionCandidates: string[] = [];
+    for (const [proxy, counts] of Object.entries(breakdown)) {
+        if (counts.total > 0 && (counts.mismatches / counts.total) > 0.3) {
+            promotionCandidates.push(proxy);
+        }
+    }
+
+    return {
+        total: totalCanaryEvals,
+        mismatches: totalMismatches,
+        mismatch_rate: totalCanaryEvals > 0 ? totalMismatches / totalCanaryEvals : 0,
+        breakdown,
+        promotion_candidates: promotionCandidates,
+    };
+}

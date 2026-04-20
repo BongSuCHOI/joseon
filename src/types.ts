@@ -233,3 +233,21 @@ export interface CrossProjectPromotionCandidateRecord {
     occurrence_count: number;
     guard_enabled: boolean;
 }
+
+export interface CanaryMismatchRecord {
+    id: string;
+    timestamp: string;
+    project_key: string;
+    proxy_type: 'phase_blocked' | 'phase_regression' | 'user_feedback' | 'error_pre_alert';
+    deterministic: {
+        decision: string;
+        detail: string;
+    };
+    canary: {
+        phase_hint?: string;
+        signal_relevance?: string;
+        confidence: number;
+        reason: string;
+    };
+    shadow_record_id: string;
+}
