@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (stability follow-up 포함, 통합 테스트 248/248 통과). Step 5a foundation + reduced-safe Step 5b shadow slice + Step 5c rule lifecycle까지 구현/검증 완료 |
+| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5e 구현/검증 완료 (smoke 147/147 통과) |
 
 ### 핵심 원칙
 
@@ -93,7 +93,7 @@ SOFT 규칙 생성 (rules/soft/)
 |----------|------|------|
 | **observer** | `src/harness/observer.ts` | L1 도구 실행 로깅 + L2 에러/불만 signal 생성 |
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
-| **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle |
+| **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping |
 | **phase-manager** | `src/orchestrator/phase-manager.ts` | Phase 상태 파일 관리 + Phase 2.5 gate + PID 세션 락 (Step 4a) |
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
@@ -132,6 +132,7 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── memory-upper-shadow.jsonl # reduced-safe 5b Extract shadow 로그
 │   │   ├── compacting-relevance-shadow.jsonl # reduced-safe 5b compacting shadow 로그
 │   │   ├── rule-prune-candidates.jsonl # Step 5c prune candidate log
+│   │   ├── mistake-pattern-candidates.jsonl # Step 5e mistake pattern candidate log
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -177,6 +178,18 @@ npm run deploy
 }
 ```
 
+### Step 5e mistake pattern candidate 설정
+
+`candidate_threshold`는 반복 실수 패턴을 candidate로 기록하는 임계값이다. 기본값은 3. 같은 패턴이 3회 이상 관측되면 `mistake-pattern-candidates.jsonl`에 candidate가 생성된다. 자동 rule 생성은 하지 않는다.
+
+```jsonc
+{
+  "harness": {
+    "candidate_threshold": 3
+  }
+}
+```
+
 자세한 개발/테스트 절차는 [`docs/development-guide.md`](docs/development-guide.md)를 참조.
 
 ## 프로젝트 구조
@@ -184,7 +197,7 @@ npm run deploy
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
-├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult, MistakePatternCandidate 타입 정의
 ├── config/                      # A2: 설정 시스템
 │   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
 │   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합

@@ -137,6 +137,20 @@ export interface MistakeSummaryShadowRecord {
     ambiguous: boolean;
 }
 
+export interface MistakePatternCandidate {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    pattern_identity: string;
+    pattern_keyword: string;
+    pattern_paths: string[];
+    source_shadow_ids: string[];
+    repetition_count: number;
+    candidate_threshold: number;
+    status: 'pending' | 'accepted' | 'rejected';
+    mistake_summary_samples: string[];
+}
+
 export interface AckRecord {
     signal_id: string;
     project_key: string;

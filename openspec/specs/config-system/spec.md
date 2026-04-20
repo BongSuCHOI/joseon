@@ -122,3 +122,14 @@
 #### Scenario: Default max_subagent_depth is 3
 - **WHEN** config 파일에 max_subagent_depth가 없음
 - **THEN** 기본값 3으로 동작함
+
+### Requirement: HarnessSettings supports candidate_threshold
+`HarnessSettings`에 `candidate_threshold` 필드가 추가된다. 기본값은 3. 반복 실수 패턴을 candidate로 기록하는 임계값이다.
+
+#### Scenario: Override candidate_threshold
+- **WHEN** config 파일에 `{"harness": {"candidate_threshold": 5}}`가 설정됨
+- **THEN** groupMistakeCandidates의 candidate 생성 임계값이 5로 설정됨
+
+#### Scenario: Default candidate_threshold is 3
+- **WHEN** config 파일에 candidate_threshold가 없음
+- **THEN** 기본값 3으로 동작함

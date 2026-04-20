@@ -10,6 +10,7 @@ import type {
     Rule,
     ProjectState,
     MistakeSummaryShadowRecord,
+    MistakePatternCandidate,
     AckRecord,
     MemoryFact,
     UpperMemoryExtractShadowRecord,
@@ -145,6 +146,132 @@ export function buildMistakeSummary(message: string, files: string[], diffText: 
     };
 }
 
+// ─── Step 5e: Pattern identity computation + candidate grouping ────
+
+const CONVENTIONAL_COMMIT_PREFIX = /^(?:fix|chore|refactor|feat|docs|test|style|perf|build|ci|revert)(?:\([^)]*\))?:\s*/i;
+
+export function computePatternIdentity(message: string, files: string[]): { identity: string; keyword: string; paths: string[] } {
+    // 1. Strip conventional commit prefix
+    const stripped = message.replace(CONVENTIONAL_COMMIT_PREFIX, '').trim();
+
+    // 2. Extract first significant word (alphanumeric, >= 2 chars)
+    let keyword = 'unknown';
+    if (stripped) {
+        const wordMatch = stripped.match(/[a-zA-Z0-9]{2,}/);
+        if (wordMatch) {
+            keyword = wordMatch[0].toLowerCase();
+        }
+    }
+
+    // 3. Normalize each file path to top 2 directory segments
+    const normalizedPaths = files
+        .map((filePath) => {
+            const segments = filePath.split('/');
+            if (segments.length <= 2) return segments.join('/');
+            return segments.slice(0, 2).join('/');
+        });
+
+    // 4. Sort and deduplicate
+    const paths = [...new Set(normalizedPaths)].sort();
+
+    // 5. Return identity
+    return {
+        identity: keyword + '::' + paths.join(','),
+        keyword,
+        paths,
+    };
+}
+
+function getMistakeCandidatePath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'mistake-pattern-candidates.jsonl');
+}
+
+function readMistakeCandidateRecords(projectKey: string): MistakePatternCandidate[] {
+    return loadJsonlRecords<MistakePatternCandidate>(getMistakeCandidatePath(projectKey));
+}
+
+function findOrCreateCandidate(
+    projectKey: string,
+    patternIdentity: { identity: string; keyword: string; paths: string[] },
+    shadowRecord: MistakeSummaryShadowRecord,
+    threshold: number,
+): void {
+    const candidates = readMistakeCandidateRecords(projectKey);
+    // Find the most recent version of the candidate (append-only JSONL — last entry wins)
+    let existing: MistakePatternCandidate | undefined;
+    for (let i = candidates.length - 1; i >= 0; i--) {
+        if (candidates[i].pattern_identity === patternIdentity.identity) {
+            existing = candidates[i];
+            break;
+        }
+    }
+
+    if (existing) {
+        // Update existing candidate
+        if (!existing.source_shadow_ids.includes(shadowRecord.id)) {
+            existing.source_shadow_ids.push(shadowRecord.id);
+        }
+        existing.repetition_count += 1;
+        if (!existing.mistake_summary_samples.includes(shadowRecord.mistake_summary) && existing.mistake_summary_samples.length < 3) {
+            existing.mistake_summary_samples.push(shadowRecord.mistake_summary);
+        }
+        // Overwrite the file with updated candidates — append-only means we just append the update as a new record
+        // Actually, let's just append the updated record
+        appendJsonlRecord(getMistakeCandidatePath(projectKey), existing as unknown as Record<string, unknown>);
+    } else if (shadowRecord.affected_files.length > 0 || shadowRecord.commit_message.trim().length > 0) {
+        // Only create a new candidate if there's meaningful data
+        const candidate: MistakePatternCandidate = {
+            id: generateId(),
+            project_key: projectKey,
+            timestamp: new Date().toISOString(),
+            pattern_identity: patternIdentity.identity,
+            pattern_keyword: patternIdentity.keyword,
+            pattern_paths: patternIdentity.paths,
+            source_shadow_ids: [shadowRecord.id],
+            repetition_count: 1,
+            candidate_threshold: threshold,
+            status: 'pending',
+            mistake_summary_samples: [shadowRecord.mistake_summary].slice(0, 3),
+        };
+        appendJsonlRecord(getMistakeCandidatePath(projectKey), candidate as unknown as Record<string, unknown>);
+    }
+}
+
+export function groupMistakeCandidates(projectKey: string, config?: HarnessConfig): void {
+    const settings = getHarnessSettings(config);
+    const threshold = settings.candidate_threshold;
+
+    const shadowRecords = loadJsonlRecords<MistakeSummaryShadowRecord>(getMistakeShadowPath(projectKey));
+    // Filter out ambiguous records
+    const nonAmbiguous = shadowRecords.filter((r) => !r.ambiguous);
+
+    // Group by pattern identity
+    const groups = new Map<string, MistakeSummaryShadowRecord[]>();
+    for (const record of nonAmbiguous) {
+        const pattern = computePatternIdentity(record.commit_message, record.affected_files);
+        const existing = groups.get(pattern.identity);
+        if (existing) {
+            existing.push(record);
+        } else {
+            groups.set(pattern.identity, [record]);
+        }
+    }
+
+    // For each group with count >= threshold, create/update candidate
+    for (const [identity, groupRecords] of groups.entries()) {
+        if (groupRecords.length < threshold) continue;
+
+        // Use the latest record as the representative
+        const latest = groupRecords[groupRecords.length - 1];
+        const pattern = computePatternIdentity(latest.commit_message, latest.affected_files);
+
+        // Check all records in the group against candidates
+        for (const record of groupRecords) {
+            findOrCreateCandidate(projectKey, pattern, record, threshold);
+        }
+    }
+}
+
 function readMistakeSummaryShadowRecords(projectKey: string): MistakeSummaryShadowRecord[] {
     const filePath = getMistakeShadowPath(projectKey);
     if (!existsSync(filePath)) return [];
@@ -159,7 +286,7 @@ function readMistakeSummaryShadowRecords(projectKey: string): MistakeSummaryShad
     }
 }
 
-export function appendMistakeSummaryShadow(projectKey: string, hash: string, message: string, files: string[], diffText: string): MistakeSummaryShadowRecord {
+export function appendMistakeSummaryShadow(projectKey: string, hash: string, message: string, files: string[], diffText: string, config?: HarnessConfig): MistakeSummaryShadowRecord {
     const normalizedHash = hash.toLowerCase();
     const existing = readMistakeSummaryShadowRecords(projectKey).find((record) => record.commit_hash.toLowerCase() === normalizedHash);
     if (existing) {
@@ -179,6 +306,16 @@ export function appendMistakeSummaryShadow(projectKey: string, hash: string, mes
     };
 
     appendJsonlRecord(getMistakeShadowPath(projectKey), record as unknown as Record<string, unknown>);
+
+    // Step 5e: trigger candidate grouping after non-ambiguous shadow append
+    if (!summary.ambiguous) {
+        try {
+            groupMistakeCandidates(projectKey, config);
+        } catch (err) {
+            logger.warn('improver', 'candidate grouping failed', { project_key: projectKey, error: err });
+        }
+    }
+
     return record;
 }
 
@@ -897,7 +1034,7 @@ function isValidTimestamp(ts: unknown): ts is string {
     return typeof ts === 'string' && ISO_DATE_REGEX.test(ts);
 }
 
-function detectFixCommits(worktree: string, projectKey: string): void {
+function detectFixCommits(worktree: string, projectKey: string, config?: HarnessConfig): void {
     // 세션 시작 타임스탬프 읽기
     const startPath = join(HARNESS_DIR, 'logs/sessions', `session_start_${projectKey}.json`);
     if (!existsSync(startPath)) return;
@@ -942,7 +1079,7 @@ function detectFixCommits(worktree: string, projectKey: string): void {
         // 3번째 줄부터 파일 목록
         const files = lines.slice(2).filter((l) => l.trim().length > 0);
 
-        appendMistakeSummaryShadow(projectKey, normalizedHash, message, files, readFixDiff(worktree, hash));
+        appendMistakeSummaryShadow(projectKey, normalizedHash, message, files, readFixDiff(worktree, hash), config);
 
         // fix_commit signal 생성 (message-based contract 유지)
         const signal: Record<string, unknown> = {
@@ -1160,7 +1297,7 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
             try {
                 // Loop 1: fix: 커밋 감지 → fix_commit signal 생성
-                detectFixCommits(ctx.worktree, projectKey);
+                detectFixCommits(ctx.worktree, projectKey, config);
             } catch (err) {
                 logger.error('improver', 'fix commit detection failed', { error: err });
             }

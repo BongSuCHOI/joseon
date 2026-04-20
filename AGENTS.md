@@ -120,7 +120,7 @@ Orchestrator (최상위, 기본 에이전트)
 ### Step 4 이후 고도화 (시기 미정)
 
 - 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
-- Step 5a 기준: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그와 default-off guard까지 구현·검증됨. reduced-safe 5b로 Extract shadow + compacting relevance shadow/default-off, Step 5c로 rule lifecycle 후보 경로까지 구현·검증됐지만, 본 경로 롤아웃은 아직 아님.
+- Step 5a~5e 구현·검증 완료. 5a: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그. 5b: Extract shadow + compacting relevance shadow/default-off. 5c: rule lifecycle 후보 경로. 5d: auto-update-checker. 5e: mistake pattern candidate grouping (`computePatternIdentity`, `groupMistakeCandidates`, `candidate_threshold` 기본 3). 본 경로 롤아웃은 아직 아님.
 
 | 항목 | 상태 / 전략 | 요약 |
 |------|-------------|------|
@@ -128,7 +128,7 @@ Orchestrator (최상위, 기본 에이전트)
 | 규칙 자동 삭제 (Pruning) | guarded-off | Step 5c로 `prune_candidate` + `rule-prune-candidates.jsonl` candidate-first 경로 구현. 삭제는 계속 비활성. |
 | Compacting 의미 기반 규칙 필터링 | default-off shadow | reduced-safe 5b로 metadata-first shadow + opt-in 경로 추가. 기본 compacting은 계속 유지. |
 | LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | shadow | deterministic baseline 유지 + phase/signal 그림자 로깅. |
-| fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로는 유지하고, mistake_summary 그림자 로깅만 축적. |
+| fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로 유지 + mistake_summary 그림자 로깅 + Step 5e로 candidate grouping 구현. `mistake-pattern-candidates.jsonl`에 threshold 기반 candidate 기록. 자동 rule 생성은 비활성. |
 | Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |
 | Cross-Project 자동 승격 | guarded-off | Step 5c로 `cross-project-promotion-candidates.jsonl` exact-match 후보 기록. 수동 `global` 우선 유지. |
 | Hooks — auto-update-checker | 완료 — default-off warn-only | npm 배포 후 `session.created`에서만 버전 확인, 전역 24h 쿨다운 상태 파일 사용. |

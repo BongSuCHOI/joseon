@@ -3,7 +3,7 @@
 이 문서는 `AGENTS.md`에 적힌 Step 4 이후 고도화 항목 8개를 자세히 정리한 문서다.  
 목적은 단순하다. **지금 당장 본 경로를 바꾸지 말고, 먼저 데이터와 그림자 비교를 쌓자.**
 
-Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lifecycle 후보 경로까지 들어갔다. phase/signal 그림자 로그, diff 실수 요약 그림자 로그, ack written/accepted 로그, prune candidate 로그, cross-project candidate 로그와 default-off/guarded-off 경로를 구현했고 smoke/build로 확인했다.
+Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lifecycle 후보 경로, Step 5d는 release ops (auto-update-checker), Step 5e는 mistake pattern candidate grouping까지 완료. phase/signal 그림자 로그, diff 실수 요약 그림자 로그, ack written/accepted 로그, prune candidate 로그, cross-project candidate 로그와 default-off/guarded-off 경로를 구현했고 smoke/build로 확인했다.
 4~7번은 여기서 바로 본 경로로 가지 않고, 아래 승격 기준을 만족할 때만 shadow → guarded → default-on/mainline 순서로 검토한다.
 
 ## 공통 원칙
@@ -47,7 +47,7 @@ Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lif
 | 2. 규칙 자동 삭제 (Pruning)     | candidate-first pruning + append-only candidate log | guarded-off        |
 | 3. 의미 기반 compacting 필터    | 필터 없음                          | default-off shadow |
 | 4. LLM 기반 Phase / signal 판정 | 결정적 baseline + phase/signal 그림자 로그 | shadow             |
-| 5. diff 기반 실수 패턴 학습     | fix 흐름 + mistake_summary 그림자 로그 | guarded-shadow     |
+| 5. diff 기반 실수 패턴 학습     | fix 흐름 + mistake_summary 그림자 로그 + candidate grouping (Step 5e) | guarded-shadow     |
 | 6. Ack 조건 강화                | written/accepted ack 로그 + default-off guard | guarded            |
 | 7. Cross-Project 자동 승격      | exact-match candidate aggregation + 수동 `global` 가능 | guarded-off        |
 | 8. auto-update-checker          | 완료 — warn-only 세션 시작 체크 + 전역 24h 쿨다운 상태 파일 | default-off        |
@@ -327,7 +327,7 @@ LLM은 결정권자가 아니라 판정자다.
 
 ### 현재 상태
 
-`fix_commit` 흐름과 diff 파싱 하드닝은 이미 있다. Step 5a로 `mistake-pattern-shadow.jsonl`에 실수 요약 그림자 로그를 쌓지만, 본 경로 학습은 아직 아니다.
+`fix_commit` 흐름과 diff 파싱 하드닝은 이미 있다. Step 5a로 `mistake-pattern-shadow.jsonl`에 실수 요약 그림자 로그를 쌓고, Step 5e로 `mistake-pattern-candidates.jsonl`에 반복 패턴을 candidate로 기록하는 `groupMistakeCandidates()`가 추가됐다. `computePatternIdentity()`로 동일 패턴을 식별하고, `candidate_threshold`(기본값 3) 도달 시 candidate를 생성한다. 본 경로 rule 생성은 아직 비활성.
 
 ### 의도
 

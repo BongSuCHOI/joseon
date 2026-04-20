@@ -386,6 +386,9 @@ cat ~/.config/opencode/harness/projects/*/compacting-relevance-shadow.jsonl
 cat ~/.config/opencode/harness/projects/*/rule-prune-candidates.jsonl
 cat ~/.config/opencode/harness/projects/global/cross-project-promotion-candidates.jsonl
 
+# Step 5e mistake pattern candidates
+cat ~/.config/opencode/harness/projects/*/mistake-pattern-candidates.jsonl
+
 # 활성 규칙
 ls ~/.config/opencode/harness/rules/hard/
 ls ~/.config/opencode/harness/rules/soft/
@@ -504,3 +507,7 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-17 | Step 5d | smoke-step5d-release-ops | ✅ | `session.created` 전용 트리거 + subagent 제외 + live registry query 비차단 확인 |
 | 2026-04-17 | Step 5d | Step 5a/5b regression | ✅ | 기존 shadow/default-off 경로 회귀 없음 |
 | 2026-04-17 | Step 5d | tmux 실세션 sanity | ⚠️ | TUI 세션 시작은 정상. 이 환경에서는 `session.created` side effect 미관측으로 상태 파일 생성은 확인되지 않아, hook-path 검증은 smoke를 기준으로 삼음 |
+| 2026-04-20 | Step 5e | npm run build | ✅ | MistakePatternCandidate type + candidate grouping + candidate_threshold 반영 |
+| 2026-04-20 | Step 5e | smoke-step5e-candidates | ✅ | 13/13 통과 (threshold 미만/도달, ambiguous 제외, candidate 업데이트, identity 결정성) |
+| 2026-04-20 | Step 5e | 전체 스모크 테스트 (147/147) | ✅ | smoke 13 + step5a 22 + step5b 22 + step5c 26 + step5d 6 + error-recovery 24 + phase-manager 25 + session-lock 9. 회귀 없음 |
+| 2026-04-20 | Step 5e | 런타임 검증 (배포 코드) | ✅ | computePatternIdentity + candidate_threshold config 직접 로드 확인 |
