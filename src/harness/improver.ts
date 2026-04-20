@@ -21,6 +21,7 @@ import type {
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
+import { evaluateCompactingCanary, readRecentCompactingShadowRecords, appendCompactingMismatchRecord } from './canary.js';
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -741,6 +742,8 @@ function appendCompactionShadowRecord(
     maxResults: number,
     filterEnabled: boolean,
     plan: CompactionSelectionPlan,
+    config?: HarnessConfig,
+    worktree?: string,
 ): CompactionRelevanceShadowRecord {
     const record: CompactionRelevanceShadowRecord = {
         id: generateId(),
@@ -774,6 +777,28 @@ function appendCompactionShadowRecord(
             })),
         ],
     };
+
+    // Step 5g: Run compacting canary evaluation if enabled
+    if (worktree) {
+        try {
+            const recentRecords = readRecentCompactingShadowRecords(worktree, 50);
+            const evaluation = evaluateCompactingCanary(record, recentRecords, config);
+            if (evaluation) {
+                record.canary = {
+                    evaluated: true,
+                    mismatches: evaluation.mismatches,
+                    confidence: evaluation.confidence,
+                    reason: evaluation.reason,
+                };
+                appendCompactingMismatchRecord(worktree, record, evaluation);
+            }
+        } catch (err) {
+            logger.warn('improver', 'compacting canary evaluation failed', {
+                project_key: projectKey,
+                error: err,
+            });
+        }
+    }
 
     appendJsonlRecord(getCompactionShadowPath(projectKey), record as unknown as Record<string, unknown>);
     return record;
@@ -1223,7 +1248,7 @@ function searchFacts(query: string, maxResults = 10): MemoryFact[] {
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
 // Phase 3: Memory Search 결과 주입 추가
 
-function buildCompactionContext(projectKey: string, worktree: string, maxResults: number, semanticCompactingEnabled: boolean): string[] {
+function buildCompactionContext(projectKey: string, worktree: string, maxResults: number, semanticCompactingEnabled: boolean, config?: HarnessConfig): string[] {
     const parts: string[] = [];
 
     // Scaffold 주입
@@ -1260,7 +1285,7 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     ].join(' ');
     const plan = planCompactionSelections(projectKey, softRules, facts, queryText, maxResults, semanticCompactingEnabled);
     try {
-        appendCompactionShadowRecord(projectKey, queryText, maxResults, semanticCompactingEnabled, plan);
+        appendCompactionShadowRecord(projectKey, queryText, maxResults, semanticCompactingEnabled, plan, config, worktree);
     } catch (err) {
         logger.warn('improver', 'compaction shadow append failed', {
             project_key: projectKey,
@@ -1380,7 +1405,7 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
         // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
         'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
-            const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results, settings.semantic_compacting_enabled);
+            const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results, settings.semantic_compacting_enabled, config);
             for (const part of parts) {
                 output.context.push(part);
             }

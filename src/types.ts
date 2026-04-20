@@ -208,6 +208,17 @@ export interface CompactionRelevanceShadowRecord {
         fact_ids: string[];
     };
     shadow_candidates: CompactionShadowCandidateRecord[];
+    canary?: {
+        evaluated: boolean;
+        mismatches: Array<{
+            type: 'rule_omission' | 'fact_omission' | 'rank_inversion';
+            item_id: string;
+            item_kind: 'soft_rule' | 'fact';
+            detail: string;
+        }>;
+        confidence: number;
+        reason: string;
+    };
 }
 
 export interface RulePruneCandidateRecord {
@@ -249,5 +260,19 @@ export interface CanaryMismatchRecord {
         confidence: number;
         reason: string;
     };
+    shadow_record_id: string;
+}
+
+export interface CompactingCanaryMismatchRecord {
+    id: string;
+    timestamp: string;
+    project_key: string;
+    mismatch_type: 'rule_omission' | 'fact_omission' | 'rank_inversion';
+    item_id: string;
+    item_kind: 'soft_rule' | 'fact';
+    baseline_rank: number;
+    applied_rank: number;  // -1 if not in applied
+    detail: string;
+    confidence: number;
     shadow_record_id: string;
 }

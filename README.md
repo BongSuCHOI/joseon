@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5f 구현/검증 완료 (smoke 77/77 통과) |
+| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5g 구현/검증 완료 (phase/signal canary smoke 77/77, compacting canary smoke 74/74 통과) |
 
 ### 핵심 원칙
 
@@ -135,6 +135,7 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── rule-prune-candidates.jsonl # Step 5c prune candidate log
 │   │   ├── mistake-pattern-candidates.jsonl # Step 5e mistake pattern candidate log
 │   │   ├── canary-mismatches.jsonl # Step 5f canary mismatch log (default-off)
+│   │   ├── compacting-canary-mismatches.jsonl # Step 5g compacting canary mismatch log (default-off)
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -200,6 +201,18 @@ npm run deploy
 {
   "harness": {
     "canary_enabled": false
+  }
+}
+```
+
+### Step 5g compacting canary 설정
+
+`compacting_canary_enabled`는 metadata-based compacting canary evaluation 활성화 여부다. 기본값은 `false`. 켜면 compacting shadow record에서 baseline과 semantic 선택 간 차이를 평가하고, 불일치하면 `compacting-canary-mismatches.jsonl`에 기록한다. 실제 compacting 선택은 변경하지 않는다. `semantic_compacting_enabled`와 독립적으로 동작한다.
+
+```jsonc
+{
+  "harness": {
+    "compacting_canary_enabled": false
   }
 }
 ```

@@ -517,3 +517,4 @@ cat ~/.config/opencode/harness/projects/*/state.json
 | 2026-04-20 | Step 5f | npm run build | ✅ | metadata-based canary evaluation (`canary_enabled`, `canary-mismatches.jsonl`, aggregation report) 반영 |
 | 2026-04-20 | Step 5f | smoke-step5f-canary (42/42) | ✅ | proxy identification, canary evaluation, shadow block population, mismatch detection, aggregation report |
 | 2026-04-20 | Step 5f | 전체 스모크 테스트 (77/77) | ✅ | step5f 42 + step5a 22 + step5b 22 + step5c 26 + step5d 6 + error-recovery 24 + phase-manager 25 + session-lock 9. 회귀 없음 |
+| 2026-04-20 | Step 5g | smoke-step5g-compacting-canary (74 assertions) | ✅ | compacting canary mismatch detection, aggregation report, shadow enrichment, canary disabled passthrough |

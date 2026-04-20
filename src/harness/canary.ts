@@ -4,7 +4,7 @@
 // and to keep dependency graphs clean (no circular deps).
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { ShadowDecisionRecord, CanaryMismatchRecord } from '../types.js';
+import type { ShadowDecisionRecord, CanaryMismatchRecord, CompactionRelevanceShadowRecord, CompactingCanaryMismatchRecord } from '../types.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import { HARNESS_DIR, getProjectKey, generateId, appendJsonlRecord, logger } from '../shared/index.js';
@@ -331,6 +331,291 @@ export function generateCanaryReport(worktree: string): CanaryReport {
     for (const [proxy, counts] of Object.entries(breakdown)) {
         if (counts.total > 0 && (counts.mismatches / counts.total) > 0.3) {
             promotionCandidates.push(proxy);
+        }
+    }
+
+    return {
+        total: totalCanaryEvals,
+        mismatches: totalMismatches,
+        mismatch_rate: totalCanaryEvals > 0 ? totalMismatches / totalCanaryEvals : 0,
+        breakdown,
+        promotion_candidates: promotionCandidates,
+    };
+}
+
+// ─── Compacting canary (Step 5b shadow) ────────────────
+
+function compactingShadowPath(worktree: string): string {
+    return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'compacting-relevance-shadow.jsonl');
+}
+
+export function getCompactingCanaryMismatchesPath(worktree: string): string {
+    return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'compacting-canary-mismatches.jsonl');
+}
+
+// ─── 2.1 Compacting shadow record reader ────────────────
+
+export function readRecentCompactingShadowRecords(worktree: string, count: number): CompactionRelevanceShadowRecord[] {
+    const filePath = compactingShadowPath(worktree);
+    if (!existsSync(filePath)) return [];
+
+    try {
+        const raw = readFileSync(filePath, 'utf-8').trim();
+        if (!raw) return [];
+
+        const lines = raw.split('\n').filter(Boolean);
+        const records: CompactionRelevanceShadowRecord[] = [];
+        // Read from the end (newest first)
+        const start = Math.max(0, lines.length - count);
+        for (let i = lines.length - 1; i >= start; i--) {
+            try {
+                records.push(JSON.parse(lines[i]) as CompactionRelevanceShadowRecord);
+            } catch {
+                // skip malformed lines
+            }
+        }
+        return records;
+    } catch {
+        return [];
+    }
+}
+
+// ─── 2.2 Evaluate compacting canary ─────────────────────
+
+export interface CompactingCanaryEvaluation {
+    mismatches: Array<{
+        type: 'rule_omission' | 'fact_omission' | 'rank_inversion';
+        item_id: string;
+        item_kind: 'soft_rule' | 'fact';
+        detail: string;
+    }>;
+    confidence: number;
+    reason: string;
+}
+
+export function evaluateCompactingCanary(
+    record: CompactionRelevanceShadowRecord,
+    recentRecords: CompactionRelevanceShadowRecord[],
+    config?: HarnessConfig,
+): CompactingCanaryEvaluation | null {
+    const settings = getHarnessSettings(config);
+    if (!settings.compacting_canary_enabled) return null;
+
+    const mismatches: CompactingCanaryEvaluation['mismatches'] = [];
+
+    // rule_omission: soft_rule_id in baseline but NOT in applied
+    const appliedRuleSet = new Set(record.applied_selection.soft_rule_ids);
+    for (const ruleId of record.baseline_selection.soft_rule_ids) {
+        if (!appliedRuleSet.has(ruleId)) {
+            mismatches.push({
+                type: 'rule_omission',
+                item_id: ruleId,
+                item_kind: 'soft_rule',
+                detail: `rule ${ruleId} present in baseline but omitted from applied selection`,
+            });
+        }
+    }
+
+    // fact_omission: fact_id in baseline but NOT in applied
+    const appliedFactSet = new Set(record.applied_selection.fact_ids);
+    for (const factId of record.baseline_selection.fact_ids) {
+        if (!appliedFactSet.has(factId)) {
+            mismatches.push({
+                type: 'fact_omission',
+                item_id: factId,
+                item_kind: 'fact',
+                detail: `fact ${factId} present in baseline but omitted from applied selection`,
+            });
+        }
+    }
+
+    // rank_inversion: baseline rank 0 (top-1) but semantic rank > 2 (beyond top-3)
+    if (record.shadow_candidates.length > 0) {
+        // Build baseline rank map: position index in baseline_selection arrays
+        const baselineRuleRanks = new Map<string, number>();
+        record.baseline_selection.soft_rule_ids.forEach((id, idx) => {
+            baselineRuleRanks.set(id, idx);
+        });
+
+        // Sort shadow_candidates by metadata_score descending to get semantic rank
+        const sortedByScore = [...record.shadow_candidates].sort(
+            (a, b) => b.metadata_score - a.metadata_score,
+        );
+
+        for (let semanticIdx = 0; semanticIdx < sortedByScore.length; semanticIdx++) {
+            const candidate = sortedByScore[semanticIdx];
+            if (candidate.candidate_kind === 'soft_rule') {
+                const baselineRank = baselineRuleRanks.get(candidate.candidate_id);
+                if (baselineRank === 0 && semanticIdx > 2) {
+                    mismatches.push({
+                        type: 'rank_inversion',
+                        item_id: candidate.candidate_id,
+                        item_kind: 'soft_rule',
+                        detail: `rule ${candidate.candidate_id} baseline_rank=0 (top-1) but semantic_rank=${semanticIdx} (beyond top-3)`,
+                    });
+                }
+            }
+        }
+    }
+
+    if (mismatches.length === 0) return null;
+
+    // Compute confidence based on omission frequency in recentRecords
+    let frequency = 0;
+    for (const r of recentRecords) {
+        const rAppliedRules = new Set(r.applied_selection.soft_rule_ids);
+        const rAppliedFacts = new Set(r.applied_selection.fact_ids);
+        for (const ruleId of r.baseline_selection.soft_rule_ids) {
+            if (!rAppliedRules.has(ruleId)) { frequency++; break; }
+        }
+        if (frequency === 0) {
+            for (const factId of r.baseline_selection.fact_ids) {
+                if (!rAppliedFacts.has(factId)) { frequency++; break; }
+            }
+        }
+    }
+
+    let confidence: number;
+    if (frequency >= 5) confidence = 0.3;
+    else if (frequency < 3) confidence = 0.7;
+    else confidence = 0.5;
+
+    const reason = `mismatches=${mismatches.length} types=[${mismatches.map(m => m.type).join(',')}] freq=${frequency} confidence=${confidence}`;
+
+    return { mismatches, confidence, reason };
+}
+
+// ─── 2.3 Append compacting mismatch records ─────────────
+
+export function appendCompactingMismatchRecord(
+    worktree: string,
+    record: CompactionRelevanceShadowRecord,
+    evaluation: CompactingCanaryEvaluation,
+): void {
+    const mismatchesPath = getCompactingCanaryMismatchesPath(worktree);
+
+    for (const mismatch of evaluation.mismatches) {
+        // Determine baseline and applied rank
+        let baselineRank = -1;
+        let appliedRank = -1;
+
+        if (mismatch.item_kind === 'soft_rule') {
+            baselineRank = record.baseline_selection.soft_rule_ids.indexOf(mismatch.item_id);
+            appliedRank = record.applied_selection.soft_rule_ids.indexOf(mismatch.item_id);
+        } else {
+            baselineRank = record.baseline_selection.fact_ids.indexOf(mismatch.item_id);
+            appliedRank = record.applied_selection.fact_ids.indexOf(mismatch.item_id);
+        }
+
+        const mismatchRecord: CompactingCanaryMismatchRecord = {
+            id: generateId(),
+            timestamp: new Date().toISOString(),
+            project_key: getProjectKey(worktree),
+            mismatch_type: mismatch.type,
+            item_id: mismatch.item_id,
+            item_kind: mismatch.item_kind,
+            baseline_rank: baselineRank,
+            applied_rank: appliedRank,
+            detail: mismatch.detail,
+            confidence: evaluation.confidence,
+            shadow_record_id: record.id,
+        };
+
+        appendJsonlRecord(mismatchesPath, mismatchRecord as unknown as Record<string, unknown>);
+
+        logger.info('compacting-canary', 'mismatch_detected', {
+            mismatch_type: mismatch.type,
+            item_id: mismatch.item_id,
+            confidence: evaluation.confidence,
+            shadow_id: record.id,
+        });
+    }
+}
+
+// ─── 2.4 Compacting canary report ───────────────────────
+
+export interface CompactingCanaryReport {
+    total: number;
+    mismatches: number;
+    mismatch_rate: number;
+    breakdown: Record<string, { total: number; mismatches: number }>;
+    promotion_candidates: string[];
+}
+
+export function generateCompactingCanaryReport(worktree: string): CompactingCanaryReport {
+    const shadowPath = compactingShadowPath(worktree);
+    const mismatchesPath = getCompactingCanaryMismatchesPath(worktree);
+
+    // Count canary evaluations from compacting shadow records
+    let totalCanaryEvals = 0;
+    const evalByMismatchType: Record<string, number> = {};
+
+    if (existsSync(shadowPath)) {
+        try {
+            const raw = readFileSync(shadowPath, 'utf-8').trim();
+            if (raw) {
+                const lines = raw.split('\n').filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const r = JSON.parse(line) as CompactionRelevanceShadowRecord;
+                        if (r.canary?.evaluated === true) {
+                            totalCanaryEvals++;
+                            // Track which mismatch types appeared in this evaluation
+                            const types = new Set(r.canary.mismatches.map(m => m.type));
+                            for (const t of types) {
+                                evalByMismatchType[t] = (evalByMismatchType[t] ?? 0) + 1;
+                            }
+                            // If no mismatches, still count as evaluated (no type to track)
+                        }
+                    } catch {
+                        // skip malformed
+                    }
+                }
+            }
+        } catch {
+            // read failure — report zeros
+        }
+    }
+
+    // Count mismatches by type
+    let totalMismatches = 0;
+    const mismatchByType: Record<string, number> = {};
+
+    if (existsSync(mismatchesPath)) {
+        try {
+            const raw = readFileSync(mismatchesPath, 'utf-8').trim();
+            if (raw) {
+                const lines = raw.split('\n').filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const m = JSON.parse(line) as CompactingCanaryMismatchRecord;
+                        totalMismatches++;
+                        mismatchByType[m.mismatch_type] = (mismatchByType[m.mismatch_type] ?? 0) + 1;
+                    } catch {
+                        // skip malformed
+                    }
+                }
+            }
+        } catch {
+            // read failure
+        }
+    }
+
+    // Build breakdown by mismatch type
+    const allTypes = new Set([...Object.keys(evalByMismatchType), ...Object.keys(mismatchByType)]);
+    const breakdown: Record<string, { total: number; mismatches: number }> = {};
+    for (const t of allTypes) {
+        breakdown[t] = {
+            total: evalByMismatchType[t] ?? 0,
+            mismatches: mismatchByType[t] ?? 0,
+        };
+    }
+
+    // Promotion candidates: types with >30% mismatch rate
+    const promotionCandidates: string[] = [];
+    for (const [type, counts] of Object.entries(breakdown)) {
+        if (counts.total > 0 && (counts.mismatches / counts.total) > 0.3) {
+            promotionCandidates.push(type);
         }
     }
 

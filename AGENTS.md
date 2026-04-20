@@ -120,13 +120,13 @@ Orchestrator (최상위, 기본 에이전트)
 ### Step 4 이후 고도화 (시기 미정)
 
 - 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
-- Step 5a~5f 구현·검증 완료. 5a: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그. 5b: Extract shadow + compacting relevance shadow/default-off. 5c: rule lifecycle 후보 경로. 5d: auto-update-checker. 5e: mistake pattern candidate grouping (`computePatternIdentity`, `groupMistakeCandidates`, `candidate_threshold` 기본 3). 5f: metadata-based phase/signal canary evaluation (`canary_enabled` default false, `canary-mismatches.jsonl`, mismatch aggregation report, smoke 77/77 통과). 본 경로 롤아웃은 아직 아님.
+- Step 5a~5g 구현·검증 완료. 5a: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그. 5b: Extract shadow + compacting relevance shadow/default-off. 5c: rule lifecycle 후보 경로. 5d: auto-update-checker. 5e: mistake pattern candidate grouping (`computePatternIdentity`, `groupMistakeCandidates`, `candidate_threshold` 기본 3). 5f: metadata-based phase/signal canary evaluation (`canary_enabled` default false, `canary-mismatches.jsonl`, mismatch aggregation report, smoke 77/77 통과). 5g: metadata-based compacting canary evaluation (`compacting_canary_enabled` default false, `compacting-canary-mismatches.jsonl`, mismatch aggregation report, smoke 74/74 통과). 본 경로 롤아웃은 아직 아님.
 
 | 항목 | 상태 / 전략 | 요약 |
 |------|-------------|------|
 | 크로스세션 기억 상위 4단계 (Extract, Consolidate, Relate, Recall) | shadow | reduced-safe 5b로 Extract shadow만 추가. Consolidate/Relate/Recall은 계속 후속 승격 대상. |
 | 규칙 자동 삭제 (Pruning) | guarded-off | Step 5c로 `prune_candidate` + `rule-prune-candidates.jsonl` candidate-first 경로 구현. 삭제는 계속 비활성. |
-| Compacting 의미 기반 규칙 필터링 | default-off shadow | reduced-safe 5b로 metadata-first shadow + opt-in 경로 추가. 기본 compacting은 계속 유지. |
+| Compacting 의미 기반 규칙 필터링 | default-off shadow + compacting canary (5g) | reduced-safe 5b로 metadata-first shadow + opt-in 경로 추가. 5g로 compacting canary evaluation 구현. 기본 compacting은 계속 유지. |
 | LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | shadow | deterministic baseline 유지 + phase/signal 그림자 로깅. Step 5f: metadata-based canary evaluation (`canary_enabled` default false) + `canary-mismatches.jsonl` + aggregation report. |
 | fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로 유지 + mistake_summary 그림자 로깅 + Step 5e로 candidate grouping 구현. `mistake-pattern-candidates.jsonl`에 threshold 기반 candidate 기록. 자동 rule 생성은 비활성. |
 | Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |

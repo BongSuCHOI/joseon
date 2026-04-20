@@ -3,7 +3,7 @@
 이 문서는 `AGENTS.md`에 적힌 Step 4 이후 고도화 항목 8개를 자세히 정리한 문서다.  
 목적은 단순하다. **지금 당장 본 경로를 바꾸지 말고, 먼저 데이터와 그림자 비교를 쌓자.**
 
-Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lifecycle 후보 경로, Step 5d는 release ops (auto-update-checker), Step 5e는 mistake pattern candidate grouping, Step 5f는 metadata-based phase/signal canary evaluation까지 완료. phase/signal 그림자 로그, diff 실수 요약 그림자 로그, ack written/accepted 로그, prune candidate 로그, cross-project candidate 로그, canary mismatch 로그와 default-off/guarded-off 경로를 구현했고 smoke/build로 확인했다.
+Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lifecycle 후보 경로, Step 5d는 release ops (auto-update-checker), Step 5e는 mistake pattern candidate grouping, Step 5f는 metadata-based phase/signal canary evaluation, Step 5g는 metadata-based compacting canary evaluation까지 완료. phase/signal 그림자 로그, diff 실수 요약 그림자 로그, ack written/accepted 로그, prune candidate 로그, cross-project candidate 로그, canary mismatch 로그, compacting canary mismatch 로그와 default-off/guarded-off 경로를 구현했고 smoke/build로 확인했다.
 4~7번은 여기서 바로 본 경로로 가지 않고, 아래 승격 기준을 만족할 때만 shadow → guarded → default-on/mainline 순서로 검토한다.
 
 ## 공통 원칙
@@ -45,14 +45,14 @@ Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lif
 | ------------------------------- | ---------------------------------- | ------------------ |
 | 1. 크로스세션 기억 상위 4단계   | Extract shadow만 존재, 나머지는 미구현 | shadow             |
 | 2. 규칙 자동 삭제 (Pruning)     | candidate-first pruning + append-only candidate log | guarded-off        |
-| 3. 의미 기반 compacting 필터    | 필터 없음                          | default-off shadow |
+| 3. 의미 기반 compacting 필터    | relevance shadow + compacting canary evaluation (Step 5g) | default-off shadow + canary |
 | 4. LLM 기반 Phase / signal 판정 | 결정적 baseline + phase/signal 그림자 로그 + metadata-based canary evaluation (Step 5f) | shadow + canary |
 | 5. diff 기반 실수 패턴 학습     | fix 흐름 + mistake_summary 그림자 로그 + candidate grouping (Step 5e) | guarded-shadow     |
 | 6. Ack 조건 강화                | written/accepted ack 로그 + default-off guard | guarded            |
 | 7. Cross-Project 자동 승격      | exact-match candidate aggregation + 수동 `global` 가능 | guarded-off        |
 | 8. auto-update-checker          | 완료 — warn-only 세션 시작 체크 + 전역 24h 쿨다운 상태 파일 | default-off        |
 
-> Step 5a foundation은 구현/검증 완료. Step 5f canary는 default-off로 구현/검증 완료. 다만 4~6번은 모두 그림자/guarded 상태이며 본 경로 롤아웃은 아직 아니다.
+> Step 5a foundation은 구현/검증 완료. Step 5f canary는 default-off로 구현/검증 완료. Step 5g compacting canary는 default-off로 구현/검증 완료. 다만 4~6번은 모두 그림자/guarded 상태이며 본 경로 롤아웃은 아직 아니다.
 
 ## 권장 순서
 
@@ -202,7 +202,7 @@ Step 5c에서 `prune_candidate`와 `rule-prune-candidates.jsonl`이 추가되었
 
 ### 현재 상태
 
-compacting은 하네스 컨텍스트를 주입한다. reduced-safe 5b로 `compacting-relevance-shadow.jsonl`에 relevance shadow를 남기고, `semantic_compacting_enabled` opt-in에서만 metadata-first 정렬을 적용할 수 있다. 기본값은 여전히 꺼져 있다.
+compacting은 하네스 컨텍스트를 주입한다. reduced-safe 5b로 `compacting-relevance-shadow.jsonl`에 relevance shadow를 남기고, `semantic_compacting_enabled` opt-in에서만 metadata-first 정렬을 적용할 수 있다. Step 5g로 compacting canary evaluation을 추가했다. `compacting_canary_enabled`(기본값 false)가 켜진 경우 shadow record에서 baseline vs semantic 차이를 평가하고 `compacting-canary-mismatches.jsonl`에 기록한다. 기본값은 여전히 꺼져 있다.
 
 ### 의도
 
