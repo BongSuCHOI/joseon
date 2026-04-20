@@ -95,13 +95,11 @@ SOFT 규칙 생성 (rules/soft/)
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
 | **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping |
 | **canary** | `src/harness/canary.ts` | Step 5f: metadata-based phase/signal canary evaluation (default-off, `canary_enabled`, mismatch detection, aggregation report) |
-| **phase-manager** | `src/orchestrator/phase-manager.ts` | Phase 상태 파일 관리 + Phase 2.5 gate + PID 세션 락 (Step 4a) |
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
-| **error-recovery** | `src/orchestrator/error-recovery.ts` | 에러 복구 5단계 에스컬레이션 (Step 4c) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
-| **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: session.idle Phase 정리 + 4개 플러그인 통합 진입점 (Step 4D~4f) |
+| **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: qa-tracker wiring + agent_id injection + 4개 플러그인 통합 진입점 (Step 4D~4f) |
 | **config** | `src/config/` | JSONC/JSON 설정 로더 + 글로벌/프로젝트 병합 + 에이전트 오버라이드 |
-| **hooks** | `src/hooks/` | 위임 재시도, JSON 에러 복구, 파일/읽기 넛지, Phase 리마인더, foreground-fallback(reactive same-session recovery), filter-available-skills |
+| **hooks** | `src/hooks/` | 위임 재시도, JSON 에러 복구, 파일/읽기 넛지, foreground-fallback(reactive same-session recovery), filter-available-skills |
 
 ## 런타임 데이터
 
@@ -146,8 +144,6 @@ SOFT 규칙 생성 (rules/soft/)
 ~/.config/opencode/harness.jsonc          # 글로벌 설정
 {project}/.opencode/harness.jsonc         # 프로젝트 설정 (우선)
 
-# Phase 상태 (프로젝트 worktree 내부)
-{project}/.opencode/orchestrator-phase.json   # Phase 1~5 상태 + 이력
 ```
 
 ## 개발
@@ -217,14 +213,14 @@ npm run deploy
 }
 ```
 
-자세한 개발/테스트 절차는 [`docs/development-guide.md`](docs/development-guide.md)를 참조.
+자세한 개발/테스트 절차는 [`docs/development.md`](docs/development.md)를 참조.
 
 ## 프로젝트 구조
 
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
-├── types.ts                     # Signal, Rule, ProjectState, PhaseState, QAFailures, EvalResult, MistakePatternCandidate 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate 타입 정의
 ├── config/                      # A2: 설정 시스템
 │   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
 │   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
@@ -234,7 +230,6 @@ src/
 │   ├── json-error-recovery.ts    # JSON 파싱 에러 감지 + 수정 프롬프트 주입
 │   ├── post-file-tool-nudge.ts   # 파일 조작 후 위임 넛지
 │   ├── post-read-nudge.ts        # 파일 읽기 후 위임 넛지
-│   ├── phase-reminder.ts         # orchestrator 워크플로우 리마인더
 │   ├── foreground-fallback.ts    # abort + prompt_async 재프롬프트로 same-session 복구
 │   ├── filter-available-skills.ts # 에이전트별 스킬 노출 필터
 │   ├── auto-update-checker.ts    # default-off warn-only release ops checker
@@ -250,9 +245,7 @@ src/
 │   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
 │   └── canary.ts                # Step 5f: metadata-based phase/signal canary evaluation
 ├── orchestrator/
-│   ├── orchestrator.ts          # Plugin 4: session.idle Phase 정리 (Step 4D~4f)
-│   ├── phase-manager.ts         # Phase 상태 관리 + Phase 2.5 gate (Step 4a)
-│   ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션 (Step 4c)
+│   ├── orchestrator.ts          # Plugin 4: qa-tracker wiring + agent_id injection (Step 4D~4f)
 │   ├── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)
 │   └── subagent-depth.ts        # 서브에이전트 깊이 추적 + 초과 차단 (B3)
 └── agents/
@@ -394,4 +387,3 @@ opencode
 - [OpenCode Plugins](https://opencode.ai/docs/plugins/) — 플러그인 구조, 훅 목록
 - [OpenCode Agents](https://opencode.ai/docs/agents/) — 에이전트 타입, 서브에이전트
 - [Self-Evolving System](https://hugh-kim.space/self-evolving-system.html) — 원본 아키텍처
-- [`docs/opencode-harness-orchestration-guide-v3-final.md`](docs/opencode-harness-orchestration-guide-v3-final.md) — 구현 가이드 (유일한 진실의 원천)

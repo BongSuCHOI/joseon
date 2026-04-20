@@ -7,7 +7,7 @@
 # Project
 
 **harness-orchestration** — OpenCode 플러그인 기반 하네스 + 오케스트레이션 시스템.
-Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 전부 완료.
+Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 + Step 5a~5h 전부 완료.
 
 # Core Rules
 
@@ -29,8 +29,7 @@ src/
 │   ├── improver.ts           # L5 자가개선 + L6 폐루프
 │   └── canary.ts             # canary 평가 (shadow + mismatch)
 ├── orchestrator/             # 오케스트레이션 레이어
-│   ├── orchestrator.ts       # 최상위 라우터
-│   ├── error-recovery.ts     # 에러 복구 5단계
+│   ├── orchestrator.ts       # 최상위 라우터 (qa-tracker wiring + agent_id)
 │   ├── qa-tracker.ts         # QA 실패 추적
 │   └── subagent-depth.ts     # 서브에이전트 깊이 추적
 ├── agents/                   # 에이전트 정의 (10개)
@@ -51,10 +50,8 @@ src/
 | [`docs/conventions.md`](docs/conventions.md) | 코딩 규칙, 플러그인 export 패턴, import 규칙 |
 | [`docs/development.md`](docs/development.md) | 개발/빌드/테스트 절차, OpenSpec 워크플로우 |
 | [`docs/roadmap.md`](docs/roadmap.md) | 향후 고도화 로드맵 (shadow→guarded→mainline 승격 기준) |
-| [`docs/v3-final.md`](docs/opencode-harness-orchestration-guide-v3-final.md) | **유일한 진실의 원천.** 구현 시 v3-final이 항상 우선 |
+| [`docs/v3-final.md`](docs/opencode-harness-orchestration-guide-v3-final.md) | 초기 구현 가이드 (레거시 참고용, 현재 아키텍처와 다를 수 있음) |
 | [`docs/api-confirmation.md`](docs/api-confirmation.md) | OpenCode Plugin API 확인 문서 |
-
-**구현 시 반드시 v3-final을 먼저 완독할 것. v3-final과 충돌하면 v3-final이 항상 우선이다.**
 
 # Key References
 

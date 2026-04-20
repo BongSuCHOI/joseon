@@ -61,7 +61,6 @@ Smoke 테스트는 개별 실행:
 
 ```bash
 # harness smoke
-./node_modules/.bin/tsx src/__tests__/smoke-error-recovery-qa.ts
 ./node_modules/.bin/tsx src/__tests__/smoke-session-lock.ts
 ./node_modules/.bin/tsx src/__tests__/smoke-step5a-foundation.ts
 ./node_modules/.bin/tsx src/__tests__/smoke-step5b-memory-relevance.ts
@@ -82,11 +81,10 @@ Smoke 테스트는 개별 실행:
 ./node_modules/.bin/tsx test/smoke-test-step4.ts
 ```
 
-### Test Files (15개, 602 assertions)
+### Test Files (14개, 571 assertions)
 
 | 파일 | Assertions |
 |------|-----------|
-| smoke-error-recovery-qa.ts | 24 |
 | smoke-session-lock.ts | 9 |
 | smoke-step5a-foundation.ts | 18 |
 | smoke-step5b-memory-relevance.ts | 22 |
@@ -100,7 +98,7 @@ Smoke 테스트는 개별 실행:
 | unit-step5d-release-ops.ts | 14 |
 | test/smoke-test.ts | 46 |
 | test/smoke-test-step3.ts | 50 |
-| test/smoke-test-step4.ts | 203 |
+| test/smoke-test-step4.ts | 189 |
 
 ### Test History
 
@@ -111,7 +109,7 @@ Smoke 테스트는 개별 실행:
 | Step 3 | 브릿지 | 통과 |
 | Step 4 | 오케스트레이션 | 통과 |
 | Step 5a~5h | shadow/guarded 기능 | 통과 |
-| Simplify | readability + Phase 제거 | 602/602 |
+| Simplify | readability + Phase 제거 + error-recovery 제거 | 571/571 |
 
 ---
 

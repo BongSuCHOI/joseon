@@ -5,7 +5,6 @@ import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { attemptRecovery } from '../src/orchestrator/error-recovery.js';
 import { trackQAFailure } from '../src/orchestrator/qa-tracker.js';
 import { createAgents } from '../src/agents/agents.js';
 import { SubagentDepthTracker } from '../src/orchestrator/subagent-depth.js';
@@ -43,50 +42,9 @@ try {
     console.log('========================================\n');
 
     // ============================================================
-    // 1. Error Recovery Integration
+    // 2. QA Tracker Integration
     // ============================================================
-    console.log('\n--- 1. Error Recovery Integration ---\n');
-
-    // 2-1. Stage 1 에러 복구
-    console.log('[2-1] Stage 1 (direct_fix)');
-    const err1 = attemptRecovery(testProjectKey, 'TypeError: Cannot read property "x"');
-    assert(err1.stage === 1, 'stage === 1');
-    assert(err1.action === 'direct_fix', 'action === direct_fix');
-
-    // 2-2. 동일 에러 Stage 2
-    console.log('\n[2-2] Stage 2 (structural_change)');
-    const err2 = attemptRecovery(testProjectKey, 'TypeError: Cannot read property "x"');
-    assert(err2.stage === 2, 'stage === 2');
-    assert(err2.action === 'structural_change', 'action === structural_change');
-
-    // 2-3. 동일 에러 Stage 3
-    console.log('\n[2-3] Stage 3 (cross_model_rescue)');
-    const err3 = attemptRecovery(testProjectKey, 'TypeError: Cannot read property "x"');
-    assert(err3.stage === 3, 'stage === 3');
-    assert(err3.action === 'cross_model_rescue', 'action === cross_model_rescue');
-
-    // 2-4. error-recovery.jsonl 파일 존재 확인
-    console.log('\n[2-4] error-recovery.jsonl 파일 검증');
-    const recoveryFilePath = join(testProjectDir, 'error-recovery.jsonl');
-    assert(existsSync(recoveryFilePath), 'error-recovery.jsonl 파일 존재');
-    if (existsSync(recoveryFilePath)) {
-        const lines = readFileSync(recoveryFilePath, 'utf-8').split('\n').filter(Boolean);
-        assert(lines.length === 3, `error-recovery.jsonl에 3개 항목 (실제: ${lines.length})`);
-        for (let i = 0; i < lines.length; i++) {
-            try {
-                const parsed = JSON.parse(lines[i]);
-                assert(parsed.stage === i + 1, `항목 ${i + 1}: stage === ${i + 1}`);
-                assert(parsed.result === 'pending', `항목 ${i + 1}: result === pending`);
-            } catch {
-                assert(false, `항목 ${i + 1}: JSON 파싱 가능`);
-            }
-        }
-    }
-
-    // ============================================================
-    // 3. QA Tracker Integration
-    // ============================================================
-    console.log('\n--- 3. QA Tracker Integration ---\n');
+    console.log('\n--- 2. QA Tracker Integration ---\n');
 
     // qa-failures.json 사전 정리 (다른 테스트 잔여물 제거)
     const qaPath = join(testProjectDir, 'qa-failures.json');

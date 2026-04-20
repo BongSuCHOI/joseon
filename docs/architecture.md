@@ -4,7 +4,7 @@
 
 **harness-orchestration**은 Hugh Kim의 하네스/오케스트레이션 아키텍처를 OpenCode 플러그인으로 재구현한 프로젝트다. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 점진적으로 구축했다.
 
-- **진실의 원천:** `docs/v3-final.md`. 구현 시 v3-final이 항상 우선.
+- **참고 문서:** `docs/v3-final.md` (초기 구현 가이드, 현재는 레거시)
 - **핵심 원칙:** 파일 = 진실. DB/IPC 없이 파일 시스템만으로 상태 관리. `~/.config/opencode/harness/`가 유일한 진실의 원천.
 - **배포 형태:** 단일 npm 패키지, 다중 플러그인 export.
 
@@ -17,7 +17,7 @@
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | `.opencode/rules/` + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator (에러 복구, 서브에이전트 라우팅) | ✅ 완료 |
+| 4 | 오케스트레이션 | + orchestrator (서브에이전트 라우팅, QA 추적 연동) | ✅ 완료 |
 | 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 default-off 또는 passive-only) |
 
 ---
@@ -142,7 +142,8 @@ Step 5f에서 추가된 metadata-based canary evaluation 모듈이다.
 
 - **판단 로직:** 대화/단순 조회 → 직접 처리, 구현/복잡 작업 → specialist 에이전트에게 위임
 - **워크플로우:** OpenCode의 superpowers 스킬 체인으로 관리
-- **Phase 관리 시스템:** Simplify 리팩터링에서 제거됨 (`phase-manager.ts`, `phase-reminder.ts` 삭제). 이유는 builder 에이전트 삭제 후 아무도 호출하지 않는 데드 인프라였기 때문.
+- **QA Tracker 연동:** orchestrator 훅에서 bash tool output을 파싱해 test failure를 감지 → `trackQAFailure()` 호출 → 반복 패턴 시 에스컬레이션 안내를 system prompt에 주입
+- **agent_id 주입:** 각 에이전트 호출 시 `agent_id`를 컨텍스트에 주입하여 로깅/추적에 활용
 
 ---
 
@@ -167,24 +168,21 @@ Step 5f에서 추가된 metadata-based canary evaluation 모듈이다.
 
 ---
 
-### Error Recovery (`src/orchestrator/error-recovery.ts`)
-
-5단계 에스컬레이션 구조:
-
-| 단계 | 방법 | 내용 |
-|------|------|------|
-| 1차 | 직접 수정 | 타입 정의, import 경로, 로직 수정 |
-| 2차 | 구조 변경 | 타입 가드, optional chaining, 대안 라이브러리 |
-| 3차 | 다른 모델 rescue | 완전히 다른 접근으로 재시도 |
-| 4차 | 리셋 | revert 후 다른 구현 방식으로 재시도 |
-| 5차 | 사용자 에스컬레이션 | 4차까지 실패 시 사용자에게 보고 |
-
----
-
 ### QA Tracker (`src/orchestrator/qa-tracker.ts`)
 
-- QA 시나리오별 실패 추적
-- 반복 검출: 동일 에러 패턴 재발 시 에스컬레이션
+QA Tracker는 orchestrator 훅에 와이어링되어 런타임에 자동 동작한다.
+
+**런타임 흐름:**
+```
+bash tool output → test failure 패턴 감지 (orchestrator hook)
+    → trackQAFailure() 호출
+    → 동일 에러 패턴 반복 감지
+    → 에스컬레이션 안내를 system prompt에 주입
+```
+
+- **QA 시나리오별 실패 추적:** `qa-failures.jsonl`에 실패 기록
+- **반복 검출:** 동일 에러 패턴 재발 시 에스컬레이션
+- **orchestrator 훅 연동:** 독립 실행이 아닌 orchestrator의 `tool.execute.after` 훅에서 자동 호출
 
 ---
 
@@ -288,7 +286,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 
 | 항목 | 원본 | v3 (현재) | 단순화 이유 |
 |------|------|-----------|-------------|
-| Phase 구조 | Phase 0~4 다단계 LLM 판정 | `signalToRule()` 결정적 코드 | 플러그인에서 LLM 호출 불가 + 비결정성 회피 |
+| ~~Phase 구조~~ | Phase 0~4 다단계 LLM 판정 | 제거됨 (`signalToRule()` 결정적 코드로 대체) | 플러그인에서 LLM 호출 불가 + 비결정성 회피 |
 | Cross-Project 승격 | 2개 프로젝트에서 동일 패턴 → global 자동 승격 | 수동 `project_key: 'global'` | 단일 프로젝트 환경, 오버엔지니어링 |
 | Pruning | 효과 없는 규칙 자동 삭제 | 측정만 자동, 삭제는 수동 | 삭제 기준 오류 시 복구 불가 |
 | Memory 상위 4단계 | 7단계 전체 구현 | 하위 3단계만 | 데이터 축적 선행 필요 |
@@ -309,7 +307,6 @@ src/
 │   └── canary.ts             # canary 평가 (shadow + mismatch)
 ├── orchestrator/             # 오케스트레이션 레이어
 │   ├── orchestrator.ts       # 최상위 라우터
-│   ├── error-recovery.ts     # 에러 복구 5단계
 │   ├── qa-tracker.ts         # QA 실패 추적
 │   └── subagent-depth.ts     # 서브에이전트 깊이 추적
 ├── agents/                   # 에이전트 정의 (10개)

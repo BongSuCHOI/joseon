@@ -1,31 +1,11 @@
-## ADDED Requirements
+## DEPRECATED — Removed
 
-### Requirement: Error recovery 5-stage escalation
-The system SHALL implement a 5-stage error recovery process for the same error summary: (1) direct fix, (2) structural change, (3) cross-model rescue, (4) reset, (5) escalate to user. Each stage SHALL be tried sequentially and recorded in error-recovery.jsonl.
+This spec has been superseded. The `error-recovery.ts` module was removed because:
 
-#### Scenario: Stage 1 direct fix attempt
-- **WHEN** `attemptRecovery(projectKey, error, context)` is called for the first time on an error
-- **THEN** system SHALL return `{ stage: 1, action: "direct_fix" }` and append the attempt to error-recovery.jsonl
+- **Stage 3 (cross_model_rescue)** overlaps entirely with `foreground-fallback.ts` (434-line fully implemented same-session model fallback)
+- **Stages 1-2 (direct_fix, structural_change)** are string labels with no executable logic
+- **Stages 4-5 (reset, escalate_to_user)** are better handled as system prompt guidance
+- Delegation error handling is already covered by `delegate-task-retry.ts` hook
+- Error repeat detection is already covered by `observer.ts` (error_repeat signal)
 
-#### Scenario: Stage 2 structural change
-- **WHEN** stage 1 has been attempted and failed (same error persists)
-- **THEN** system SHALL return `{ stage: 2, action: "structural_change" }` and record the attempt
-
-#### Scenario: Stage 3 cross-model rescue
-- **WHEN** stages 1-2 have failed
-- **THEN** system SHALL return `{ stage: 3, action: "cross_model_rescue" }`
-
-#### Scenario: Stage 4 reset
-- **WHEN** stages 1-3 have all failed
-- **THEN** system SHALL return `{ stage: 4, action: "reset" }`
-
-#### Scenario: Stage 5 terminal user escalation
-- **WHEN** stage 4 also fails
-- **THEN** system SHALL return `{ stage: 5, action: "escalate_to_user" }` and stop automatic recovery
-
-### Requirement: Error recovery history logging
-The system SHALL log each recovery attempt to `projects/{key}/error-recovery.jsonl` with stage, timestamp, error summary, and result.
-
-#### Scenario: Log recovery attempt
-- **WHEN** any recovery stage is attempted
-- **THEN** system SHALL append `{ timestamp, stage, action, error_summary, result }` to the JSONL file
+See `orchestrator-plugin/spec.md` for the current QA tracking approach.

@@ -63,7 +63,7 @@ export default {
     const observerHooks = await HarnessObserver({ worktree, config: harnessConfig });
     const enforcerHooks = await HarnessEnforcer(ctx, harnessConfig);
     const improverHooks = await HarnessImprover(ctx, harnessConfig);
-    const orchestratorHooks = await HarnessOrchestrator(ctx);
+    const orchestratorHooks = await HarnessOrchestrator({ worktree, config: harnessConfig, sessionAgents });
     const extraHooks = createAllHooks({
       worktree: input.worktree,
       harnessConfig,
