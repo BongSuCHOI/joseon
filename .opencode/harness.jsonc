@@ -107,13 +107,13 @@
         "history_max_bytes": 1048576, // history.jsonl 최대 크기 (bytes, 초과 시 rotate)
         "search_max_results": 10, // memory search 최대 결과 수
 
-        // ─── Shadow / Guarded Features (all default-off) ───
-        "ack_guard_enabled": false, // multi-check ack acceptance (rule_written + rule_valid + not_prune_candidate)
-        "semantic_compacting_enabled": false, // compacting 시 의미 기반 규칙 필터링
-        "canary_enabled": false, // phase/signal canary — deterministic vs metadata 불일치 관찰
-        "compacting_canary_enabled": false, // compacting canary — baseline vs semantic 선택 차이 관찰
-        "prune_guard_enabled": false, // 비활성 규칙 자동 삭제 후보 기록
-        "cross_project_promotion_guard_enabled": false, // 크로스 프로젝트 규칙 승격 후보 기록
+        // ─── Step 5 Features (activated 2026-04-21) ───
+        "ack_guard_enabled": true, // 5a: multi-check ack acceptance
+        "semantic_compacting_enabled": true, // 5b: semantic ranking for compacting
+        "canary_enabled": true, // 5f: phase/signal canary evaluation
+        "compacting_canary_enabled": true, // 5g: compacting relevance canary
+        "prune_guard_enabled": true, // 5c: rule pruning guard
+        "cross_project_promotion_guard_enabled": true, // 5c: cross-project promotion guard
         "auto_update_checker_enabled": false, // 세션 시작 시 npm 버전 체크 (warn-only)
     },
 

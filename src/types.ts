@@ -279,3 +279,25 @@ export interface CompactingCanaryMismatchRecord {
     confidence: number;
     shadow_record_id: string;
 }
+
+export interface ConsolidationRecord {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    group_size: number;
+    canonical_fact_id: string;
+    archived_fact_ids: string[];
+    merged_keywords: string[];
+    reason: string;
+}
+
+export interface FactRelation {
+    id: string;
+    fact_a_id: string;
+    fact_b_id: string;
+    relation_type: 'same_topic' | 'shared_keywords';
+    shared_keywords: string[];
+    strength: number; // 0-1 based on overlap ratio
+    project_key: string;
+    timestamp: string;
+}

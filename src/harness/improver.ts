@@ -18,6 +18,8 @@ import type {
     CompactionRelevanceShadowRecord,
     RulePruneCandidateRecord,
     CrossProjectPromotionCandidateRecord,
+    ConsolidationRecord,
+    FactRelation,
 } from '../types.js';
 import { HARNESS_DIR, THIRTY_DAYS_MS, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
@@ -1284,6 +1286,237 @@ function searchFacts(query: string, maxResults = 10): MemoryFact[] {
         .map((item) => item.fact);
 }
 
+// ─── Phase 3: Memory Consolidation — duplicate fact merging ──
+
+function computeJaccard(a: string[], b: string[]): number {
+    const sa = new Set(a.map(k => k.toLowerCase()));
+    const sb = new Set(b.map(k => k.toLowerCase()));
+    const intersection = [...sa].filter(x => sb.has(x)).length;
+    const union = new Set([...sa, ...sb]).size;
+    return union === 0 ? 0 : intersection / union;
+}
+
+function hasContentOverlap(a: string, b: string): boolean {
+    if (a.length < 30 || b.length < 30) return false;
+    return a.startsWith(b.slice(0, Math.floor(b.length * 0.6))) ||
+           b.startsWith(a.slice(0, Math.floor(a.length * 0.6)));
+}
+
+class UnionFind {
+    private parent: Map<string, string> = new Map();
+
+    find(x: string): string {
+        if (!this.parent.has(x)) this.parent.set(x, x);
+        let root = x;
+        while (this.parent.get(root) !== root) root = this.parent.get(root)!;
+        // path compression
+        let current = x;
+        while (current !== root) {
+            const next = this.parent.get(current)!;
+            this.parent.set(current, root);
+            current = next;
+        }
+        return root;
+    }
+
+    union(a: string, b: string): void {
+        const ra = this.find(a);
+        const rb = this.find(b);
+        if (ra !== rb) this.parent.set(ra, rb);
+    }
+}
+
+function getConsolidationShadowPath(projectKey: string): string {
+    return join(HARNESS_DIR, `shadow/consolidation-shadow-${projectKey}.jsonl`);
+}
+
+function consolidateFacts(projectKey: string): void {
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    if (!existsSync(factsDir)) return;
+
+    const allFacts = loadJsonFiles<MemoryFact>(factsDir);
+    if (allFacts.length < 2) return;
+
+    // Build similarity groups via union-find
+    const uf = new UnionFind();
+    const reasons = new Map<string, string>();
+
+    for (let i = 0; i < allFacts.length; i++) {
+        for (let j = i + 1; j < allFacts.length; j++) {
+            const a = allFacts[i];
+            const b = allFacts[j];
+            const jaccardSimilar = computeJaccard(a.keywords, b.keywords) > 0.4;
+            const contentSimilar = hasContentOverlap(a.content, b.content);
+
+            if (jaccardSimilar || contentSimilar) {
+                const reason = jaccardSimilar && contentSimilar
+                    ? 'jaccard+content'
+                    : jaccardSimilar ? 'jaccard' : 'content';
+                uf.union(a.id, b.id);
+                // store the first reason observed for this pair
+                const root = uf.find(a.id);
+                if (!reasons.has(root)) reasons.set(root, reason);
+            }
+        }
+    }
+
+    // Collect groups
+    const groups = new Map<string, MemoryFact[]>();
+    for (const fact of allFacts) {
+        const root = uf.find(fact.id);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root)!.push(fact);
+    }
+
+    const archiveDir = join(HARNESS_DIR, 'memory/archive');
+    mkdirSync(archiveDir, { recursive: true });
+
+    // Ensure shadow dir exists
+    const shadowDir = join(HARNESS_DIR, 'shadow');
+    mkdirSync(shadowDir, { recursive: true });
+
+    for (const [root, group] of groups) {
+        if (group.length <= 1) continue;
+
+        // Pick canonical: longest content (most information preserved)
+        const canonical = group.reduce((best, f) =>
+            f.content.length > best.content.length ? f : best, group[0]);
+
+        // Merge keywords from all members (dedup, lowercase)
+        const mergedKeywords = [...new Set(group.flatMap(f => f.keywords.map(k => k.toLowerCase())))];
+
+        // Keep most specific project_key (prefer defined string over undefined)
+        const bestProjectKey = group
+            .map(f => f.project_key)
+            .find(pk => pk !== undefined) ?? canonical.project_key;
+
+        // Keep earliest created_at
+        const earliestCreatedAt = group
+            .map(f => f.created_at)
+            .reduce((earliest, at) => at < earliest ? at : earliest, group[0].created_at);
+
+        // Update canonical fact
+        const updatedCanonical: MemoryFact = {
+            ...canonical,
+            project_key: bestProjectKey,
+            keywords: mergedKeywords,
+            created_at: earliestCreatedAt,
+        };
+
+        // Write canonical back
+        writeFileSync(
+            join(factsDir, `${canonical.id}.json`),
+            JSON.stringify(updatedCanonical, null, 2),
+        );
+
+        // Archive non-canonical originals
+        const archivedIds: string[] = [];
+        for (const fact of group) {
+            if (fact.id === canonical.id) continue;
+            const srcPath = join(factsDir, `${fact.id}.json`);
+            const dstPath = join(archiveDir, `${fact.id}.json`);
+            if (existsSync(srcPath)) {
+                renameSync(srcPath, dstPath);
+            }
+            archivedIds.push(fact.id);
+        }
+
+        // Write consolidation record
+        const record: ConsolidationRecord = {
+            id: generateId(),
+            project_key: projectKey,
+            timestamp: new Date().toISOString(),
+            group_size: group.length,
+            canonical_fact_id: canonical.id,
+            archived_fact_ids: archivedIds,
+            merged_keywords: mergedKeywords,
+            reason: reasons.get(root) ?? 'unknown',
+        };
+
+        appendRecord(getConsolidationShadowPath(projectKey), record);
+        logger.info('improver', 'consolidated facts', {
+            canonical: canonical.id,
+            archived: archivedIds,
+            reason: record.reason,
+        });
+    }
+}
+
+// ─── 3.6b Fact Relations — discover relationships between facts ──
+
+function relateFacts(projectKey: string): void {
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    if (!existsSync(factsDir)) return;
+
+    const allFacts = loadJsonFiles<MemoryFact>(factsDir);
+    if (allFacts.length < 2) return;
+
+    const relationsPath = join(HARNESS_DIR, 'memory/relations.jsonl');
+    const existingRelations = loadJsonlRecords<FactRelation>(relationsPath);
+
+    // Build set of existing pairs for O(1) lookup
+    const existingPairs = new Set<string>();
+    for (const rel of existingRelations) {
+        // Normalize pair key: always sort alphabetically
+        const [lo, hi] = rel.fact_a_id < rel.fact_b_id
+            ? [rel.fact_a_id, rel.fact_b_id]
+            : [rel.fact_b_id, rel.fact_a_id];
+        existingPairs.add(`${lo}::${hi}`);
+    }
+
+    const MAX_NEW_RELATIONS = 200;
+    let newCount = 0;
+
+    for (let i = 0; i < allFacts.length && newCount < MAX_NEW_RELATIONS; i++) {
+        for (let j = i + 1; j < allFacts.length && newCount < MAX_NEW_RELATIONS; j++) {
+            const a = allFacts[i];
+            const b = allFacts[j];
+
+            // Compute shared keywords (case-insensitive)
+            const setA = new Set(a.keywords.map(k => k.toLowerCase()));
+            const setB = new Set(b.keywords.map(k => k.toLowerCase()));
+            const shared = [...setA].filter(k => setB.has(k));
+
+            // Skip weak connections
+            if (shared.length < 2) continue;
+
+            // Check for duplicate
+            const [lo, hi] = a.id < b.id ? [a.id, b.id] : [b.id, a.id];
+            const pairKey = `${lo}::${hi}`;
+            if (existingPairs.has(pairKey)) continue;
+
+            // Compute strength
+            const minLen = Math.min(a.keywords.length, b.keywords.length);
+            const strength = minLen > 0 ? shared.length / minLen : 0;
+
+            // Determine relation type
+            const sameProject = a.project_key !== undefined
+                && b.project_key !== undefined
+                && a.project_key === b.project_key;
+            const relationType = sameProject ? 'same_topic' : 'shared_keywords';
+
+            const relation: FactRelation = {
+                id: generateId(),
+                fact_a_id: lo,
+                fact_b_id: hi,
+                relation_type: relationType,
+                shared_keywords: shared,
+                strength: Math.min(strength, 1),
+                project_key: projectKey,
+                timestamp: new Date().toISOString(),
+            };
+
+            appendRecord(relationsPath, relation);
+            existingPairs.add(pairKey);
+            newCount++;
+        }
+    }
+
+    if (newCount > 0) {
+        logger.info('improver', 'discovered fact relations', { count: newCount });
+    }
+}
+
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
 // Phase 3: Memory Search 결과 주입 추가
 
@@ -1438,6 +1671,20 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                 indexSessionFacts(projectKey);
             } catch (err) {
                 logger.error('improver', 'memory indexing failed', { error: err });
+            }
+
+            // Phase 3: Memory consolidation — merge duplicate facts
+            try {
+                consolidateFacts(projectKey);
+            } catch (err) {
+                logger.error('improver', 'fact consolidation failed', { error: err });
+            }
+
+            // Phase 3: Fact relations — discover relationships between facts
+            try {
+                relateFacts(projectKey);
+            } catch (err) {
+                logger.error('improver', 'fact relation discovery failed', { error: err });
             }
 
             // 프로젝트 상태 갱신
