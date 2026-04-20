@@ -1,7 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR } from '../shared/constants.js';
-import { getProjectKey } from '../shared/utils.js';
+import { HARNESS_DIR, getProjectKey, readJsonFile, MAX_ERROR_SUMMARY_LENGTH } from '../shared/index.js';
 
 type AgentSessionInfo = {
     agent: string;
@@ -236,14 +235,9 @@ export function createForegroundFallbackController(worktree: string, enabled = t
     const advancedSessions = new Set<string>();
 
     function loadState(): ForegroundFallbackFile {
-        if (!existsSync(statePath)) return { agents: {} };
-        try {
-            const parsed = JSON.parse(readFileSync(statePath, 'utf-8')) as ForegroundFallbackFile;
-            if (!parsed || typeof parsed !== 'object' || !parsed.agents) return { agents: {} };
-            return { agents: parsed.agents ?? {} };
-        } catch {
-            return { agents: {} };
-        }
+        const parsed = readJsonFile<ForegroundFallbackFile | null>(statePath, null);
+        if (!parsed || typeof parsed !== 'object' || !parsed.agents) return { agents: {} };
+        return { agents: parsed.agents ?? {} };
     }
 
     function saveState(state: ForegroundFallbackFile): void {
@@ -310,7 +304,7 @@ export function createForegroundFallbackController(worktree: string, enabled = t
         agentState.cursor = nextCursor;
         agentState.updated_at = new Date().toISOString();
         agentState.last_session_id = sessionID;
-        agentState.last_failure = message.slice(0, 200);
+        agentState.last_failure = message.slice(0, MAX_ERROR_SUMMARY_LENGTH);
         saveState(state);
         advancedSessions.add(sessionID);
         return true;
@@ -341,7 +335,7 @@ export function createForegroundFallbackController(worktree: string, enabled = t
             agentState.cursor = nextCursor;
             agentState.updated_at = new Date().toISOString();
             agentState.last_session_id = sessionID;
-            agentState.last_failure = message.slice(0, 200);
+            agentState.last_failure = message.slice(0, MAX_ERROR_SUMMARY_LENGTH);
             saveState(state);
         };
 

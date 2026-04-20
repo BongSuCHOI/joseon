@@ -1,10 +1,8 @@
-import { mkdirSync, appendFileSync, realpathSync, statSync, renameSync, existsSync } from 'fs';
+import { mkdirSync, appendFileSync, realpathSync, statSync, renameSync, existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { HARNESS_DIR } from './constants.js';
 import { logger } from './logger.js';
-
-export { HARNESS_DIR };
 
 export function getProjectKey(worktree: string): string {
     try {
@@ -78,6 +76,38 @@ export function parseList(items: string[], allAvailable: string[]): string[] {
 export function isPluginSource(filePath: string): boolean {
     const normalized = filePath.replace(/\\/g, '/');
     return normalized.includes('/src/') || normalized.includes('/.opencode/plugins/');
+}
+
+/** Read a JSON file with fallback — returns `fallback` if file missing or malformed. */
+export function readJsonFile<T>(filePath: string, fallback: T): T {
+    if (!existsSync(filePath)) return fallback;
+    try {
+        return JSON.parse(readFileSync(filePath, 'utf-8')) as T;
+    } catch {
+        return fallback;
+    }
+}
+
+/** Read a JSONL file, parsing each line as T. Returns [] if file missing or all lines malformed. */
+export function readJsonlFile<T>(filePath: string): T[] {
+    if (!existsSync(filePath)) return [];
+    try {
+        const raw = readFileSync(filePath, 'utf-8').trim();
+        if (!raw) return [];
+        const results: T[] = [];
+        for (const line of raw.split('\n')) {
+            if (!line.trim()) continue;
+            try { results.push(JSON.parse(line) as T); } catch { /* skip malformed */ }
+        }
+        return results;
+    } catch {
+        return [];
+    }
+}
+
+/** Safely extract error message from unknown thrown value. */
+export function safeErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

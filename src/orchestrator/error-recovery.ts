@@ -1,7 +1,7 @@
 // src/orchestrator/error-recovery.ts — 에러 복구 4단계 (5단계 에스컬레이션)
 import { appendFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR } from '../shared/index.js';
+import { HARNESS_DIR, MAX_ERROR_SUMMARY_LENGTH } from '../shared/index.js';
 import type { HarnessSettings } from '../config/index.js';
 import { DEFAULT_HARNESS_SETTINGS } from '../config/index.js';
 
@@ -68,7 +68,7 @@ export function attemptRecovery(
 ): RecoveryStage {
     const maxStages = settings?.max_recovery_stages ?? DEFAULT_HARNESS_SETTINGS.max_recovery_stages;
     const filePath = getRecoveryFilePath(projectKey);
-    const errorSummary = error.slice(0, 200);
+    const errorSummary = error.slice(0, MAX_ERROR_SUMMARY_LENGTH);
     const lastStage = getLastStageForError(filePath, errorSummary);
 
     // 다음 단계 (최대 5)

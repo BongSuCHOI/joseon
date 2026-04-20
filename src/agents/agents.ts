@@ -4,6 +4,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { HarnessConfig, AgentOverrideConfig, FallbackConfig } from '../config/index.js';
 import { logger } from '../shared/logger.js';
+import { safeErrorMessage } from '../shared/index.js';
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,19 @@ export interface AgentDefinition {
 function loadPrompt(filename: string): string {
     const promptPath = join(moduleDir, 'prompts', filename);
     return readFileSync(promptPath, 'utf-8');
+}
+
+function loadOptionalFile(path: string, label: string): string {
+    if (!existsSync(path)) {
+        logger.warn('agents', `${label} not found: ${path}`);
+        return '';
+    }
+    try {
+        return readFileSync(path, 'utf-8');
+    } catch (err) {
+        logger.warn('agents', `Failed to load ${label}: ${path}`, { error: safeErrorMessage(err) });
+        return '';
+    }
 }
 
 function resolveModelValue(modelValue: string | { id: string; variant?: string }): string {
@@ -61,31 +75,14 @@ function applyOverrides(
         }
 
         if (overrides.prompt !== undefined) {
-            if (existsSync(overrides.prompt)) {
-                try {
-                    prompt = readFileSync(overrides.prompt, 'utf-8');
-                } catch (err) {
-                    logger.warn('agents', `Failed to load prompt file: ${overrides.prompt}`, {
-                        error: err instanceof Error ? err.message : String(err),
-                    });
-                }
-            } else {
-                logger.warn('agents', `Prompt file not found, using default: ${overrides.prompt}`);
-            }
+            const loaded = loadOptionalFile(overrides.prompt, 'Prompt file');
+            if (loaded) prompt = loaded;
+            else logger.warn('agents', `Using default prompt`);
         }
 
         if (overrides.append_prompt !== undefined) {
-            if (existsSync(overrides.append_prompt)) {
-                try {
-                    prompt = prompt + '\n\n' + readFileSync(overrides.append_prompt, 'utf-8');
-                } catch (err) {
-                    logger.warn('agents', `Failed to load append_prompt file: ${overrides.append_prompt}`, {
-                        error: err instanceof Error ? err.message : String(err),
-                    });
-                }
-            } else {
-                logger.warn('agents', `append_prompt file not found, skipping: ${overrides.append_prompt}`);
-            }
+            const loaded = loadOptionalFile(overrides.append_prompt, 'append_prompt file');
+            if (loaded) prompt = prompt + '\n\n' + loaded;
         }
 
         if (overrides.options !== undefined) {

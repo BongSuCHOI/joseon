@@ -2,12 +2,22 @@
 // low-confidence deterministic phase/signal decisions.
 // All canary functions are isolated here to avoid growing improver.ts further
 // and to keep dependency graphs clean (no circular deps).
-import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { ShadowDecisionRecord, CanaryMismatchRecord, CompactionRelevanceShadowRecord, CompactingCanaryMismatchRecord } from '../types.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
-import { HARNESS_DIR, getProjectKey, generateId, appendJsonlRecord, logger } from '../shared/index.js';
+import { HARNESS_DIR, getProjectKey, generateId, appendJsonlRecord, readJsonlFile, logger } from '../shared/index.js';
+
+// ─── Constants ─────────────────────────────────────────────
+
+const RECENT_RECORDS_COUNT = 50;
+const CONFIDENCE_HIGH_FREQ = 5;
+const CONFIDENCE_LOW_FREQ = 3;
+const CONFIDENCE_HIGH = 0.7;
+const CONFIDENCE_MEDIUM = 0.5;
+const CONFIDENCE_LOW = 0.3;
+const MISMATCH_CONFIDENCE_THRESHOLD = 0.7;
+const PROMOTION_MISMATCH_RATE = 0.3;
 
 // ─── Paths ─────────────────────────────────────────────
 
@@ -23,27 +33,8 @@ export function getCanaryMismatchesPath(worktree: string): string {
 
 export function readRecentShadowRecords(worktree: string, count: number): ShadowDecisionRecord[] {
     const filePath = phaseSignalShadowPath(worktree);
-    if (!existsSync(filePath)) return [];
-
-    try {
-        const raw = readFileSync(filePath, 'utf-8').trim();
-        if (!raw) return [];
-
-        const lines = raw.split('\n').filter(Boolean);
-        const records: ShadowDecisionRecord[] = [];
-        // Read from the end (newest first)
-        const start = Math.max(0, lines.length - count);
-        for (let i = lines.length - 1; i >= start; i--) {
-            try {
-                records.push(JSON.parse(lines[i]) as ShadowDecisionRecord);
-            } catch {
-                // skip malformed lines
-            }
-        }
-        return records;
-    } catch {
-        return [];
-    }
+    const all = readJsonlFile<ShadowDecisionRecord>(filePath);
+    return all.slice(-count).reverse();
 }
 
 // ─── 3.1 Low-confidence proxy detection ────────────────
@@ -109,9 +100,9 @@ export function computeConfidence(proxyType: string, recentRecords: ShadowDecisi
         }
     }
 
-    if (frequency >= 5) return 0.3;
-    if (frequency < 3) return 0.7;
-    return 0.5;
+    if (frequency >= CONFIDENCE_HIGH_FREQ) return CONFIDENCE_LOW;
+    if (frequency < CONFIDENCE_LOW_FREQ) return CONFIDENCE_HIGH;
+    return CONFIDENCE_MEDIUM;
 }
 
 // ─── 4.4 Evaluate canary ───────────────────────────────
@@ -150,8 +141,6 @@ export function evaluateCanary(
     return null;
 }
 
-// ─── 5.3 Mismatch path (exported above) ────────────────
-
 // ─── 5.4 Append mismatch record ────────────────────────
 
 export function appendMismatchRecord(
@@ -164,14 +153,14 @@ export function appendMismatchRecord(
     // Phase mismatch: blocked transition AND canary is confident AND confirms blocked
     if (record.kind === 'phase') {
         const ctx = record.context as Record<string, unknown> | undefined;
-        if (ctx?.transition_status === 'blocked' && canaryResult.confidence >= 0.7 && canaryResult.phase_hint === 'blocked_gate') {
+        if (ctx?.transition_status === 'blocked' && canaryResult.confidence >= MISMATCH_CONFIDENCE_THRESHOLD && canaryResult.phase_hint === 'blocked_gate') {
             isMismatch = true;
         }
     }
 
     // Signal mismatch: NOT emitted but canary says high/medium relevance with confidence
     if (record.kind === 'signal') {
-        if (!record.deterministic.emitted && (canaryResult.signal_relevance === 'high' || canaryResult.signal_relevance === 'medium') && canaryResult.confidence >= 0.7) {
+        if (!record.deterministic.emitted && (canaryResult.signal_relevance === 'high' || canaryResult.signal_relevance === 'medium') && canaryResult.confidence >= MISMATCH_CONFIDENCE_THRESHOLD) {
             isMismatch = true;
         }
     }
@@ -223,17 +212,18 @@ export function runCanaryEvaluation(
     record: ShadowDecisionRecord,
     config?: HarnessConfig,
 ): ShadowDecisionRecord | null {
-    const recentRecords = readRecentShadowRecords(worktree, 50);
+    const recentRecords = readRecentShadowRecords(worktree, RECENT_RECORDS_COUNT);
     const canaryResult = evaluateCanary(record, recentRecords, config);
     if (!canaryResult) return null;
 
     // Populate shadow block on the record
+    const relevanceMap: Record<string, 'relevant' | 'irrelevant' | undefined> = { high: 'relevant', medium: 'relevant', low: 'irrelevant' };
     const evaluated: ShadowDecisionRecord = {
         ...record,
         shadow: {
             status: 'low_confidence',
             phase_hint: canaryResult.phase_hint ? Number(canaryResult.phase_hint) || undefined : undefined,
-            signal_relevance: canaryResult.signal_relevance === 'high' ? 'relevant' : canaryResult.signal_relevance === 'medium' ? 'relevant' : canaryResult.signal_relevance === 'low' ? 'irrelevant' : undefined,
+            signal_relevance: relevanceMap[canaryResult.signal_relevance ?? ''],
             confidence: canaryResult.confidence,
             reason: canaryResult.reason,
         },
@@ -267,28 +257,14 @@ export function generateCanaryReport(worktree: string): CanaryReport {
     let totalCanaryEvals = 0;
     const canaryEvalByProxy: Record<string, number> = {};
 
-    if (existsSync(shadowPath)) {
-        try {
-            const raw = readFileSync(shadowPath, 'utf-8').trim();
-            if (raw) {
-                const lines = raw.split('\n').filter(Boolean);
-                for (const line of lines) {
-                    try {
-                        const r = JSON.parse(line) as ShadowDecisionRecord;
-                        if (r.shadow?.status === 'low_confidence') {
-                            totalCanaryEvals++;
-                            const proxy = isLowConfidenceProxy(r);
-                            if (proxy) {
-                                canaryEvalByProxy[proxy] = (canaryEvalByProxy[proxy] ?? 0) + 1;
-                            }
-                        }
-                    } catch {
-                        // skip malformed
-                    }
-                }
+    const shadowRecords = readJsonlFile<ShadowDecisionRecord>(shadowPath);
+    for (const r of shadowRecords) {
+        if (r.shadow?.status === 'low_confidence') {
+            totalCanaryEvals++;
+            const proxy = isLowConfidenceProxy(r);
+            if (proxy) {
+                canaryEvalByProxy[proxy] = (canaryEvalByProxy[proxy] ?? 0) + 1;
             }
-        } catch {
-            // read failure — report zeros
         }
     }
 
@@ -296,24 +272,10 @@ export function generateCanaryReport(worktree: string): CanaryReport {
     let totalMismatches = 0;
     const mismatchByProxy: Record<string, number> = {};
 
-    if (existsSync(mismatchesPath)) {
-        try {
-            const raw = readFileSync(mismatchesPath, 'utf-8').trim();
-            if (raw) {
-                const lines = raw.split('\n').filter(Boolean);
-                for (const line of lines) {
-                    try {
-                        const m = JSON.parse(line) as CanaryMismatchRecord;
-                        totalMismatches++;
-                        mismatchByProxy[m.proxy_type] = (mismatchByProxy[m.proxy_type] ?? 0) + 1;
-                    } catch {
-                        // skip malformed
-                    }
-                }
-            }
-        } catch {
-            // read failure
-        }
+    const mismatchRecords = readJsonlFile<CanaryMismatchRecord>(mismatchesPath);
+    for (const m of mismatchRecords) {
+        totalMismatches++;
+        mismatchByProxy[m.proxy_type] = (mismatchByProxy[m.proxy_type] ?? 0) + 1;
     }
 
     // Build breakdown
@@ -329,7 +291,7 @@ export function generateCanaryReport(worktree: string): CanaryReport {
     // Promotion candidates: proxy types where mismatch rate > 30% (of total evals for that type)
     const promotionCandidates: string[] = [];
     for (const [proxy, counts] of Object.entries(breakdown)) {
-        if (counts.total > 0 && (counts.mismatches / counts.total) > 0.3) {
+        if (counts.total > 0 && (counts.mismatches / counts.total) > PROMOTION_MISMATCH_RATE) {
             promotionCandidates.push(proxy);
         }
     }
@@ -353,34 +315,15 @@ export function getCompactingCanaryMismatchesPath(worktree: string): string {
     return join(HARNESS_DIR, 'projects', getProjectKey(worktree), 'compacting-canary-mismatches.jsonl');
 }
 
-// ─── 2.1 Compacting shadow record reader ────────────────
+// ─── 7.1 Compacting shadow record reader ────────────────
 
 export function readRecentCompactingShadowRecords(worktree: string, count: number): CompactionRelevanceShadowRecord[] {
     const filePath = compactingShadowPath(worktree);
-    if (!existsSync(filePath)) return [];
-
-    try {
-        const raw = readFileSync(filePath, 'utf-8').trim();
-        if (!raw) return [];
-
-        const lines = raw.split('\n').filter(Boolean);
-        const records: CompactionRelevanceShadowRecord[] = [];
-        // Read from the end (newest first)
-        const start = Math.max(0, lines.length - count);
-        for (let i = lines.length - 1; i >= start; i--) {
-            try {
-                records.push(JSON.parse(lines[i]) as CompactionRelevanceShadowRecord);
-            } catch {
-                // skip malformed lines
-            }
-        }
-        return records;
-    } catch {
-        return [];
-    }
+    const all = readJsonlFile<CompactionRelevanceShadowRecord>(filePath);
+    return all.slice(-count).reverse();
 }
 
-// ─── 2.2 Evaluate compacting canary ─────────────────────
+// ─── 7.2 Evaluate compacting canary ─────────────────────
 
 export interface CompactingCanaryEvaluation {
     mismatches: Array<{
@@ -475,17 +418,25 @@ export function evaluateCompactingCanary(
         }
     }
 
-    let confidence: number;
-    if (frequency >= 5) confidence = 0.3;
-    else if (frequency < 3) confidence = 0.7;
-    else confidence = 0.5;
+    const confidence = computeCompactingConfidence(frequency);
 
     const reason = `mismatches=${mismatches.length} types=[${mismatches.map(m => m.type).join(',')}] freq=${frequency} confidence=${confidence}`;
 
     return { mismatches, confidence, reason };
 }
 
-// ─── 2.3 Append compacting mismatch records ─────────────
+/**
+ * Compute confidence for compacting canary based on omission frequency.
+ * High frequency → low confidence (deterministic is unreliable).
+ * Low frequency → high confidence (deterministic is reliable).
+ */
+function computeCompactingConfidence(frequency: number): number {
+    if (frequency >= CONFIDENCE_HIGH_FREQ) return CONFIDENCE_LOW;
+    if (frequency < CONFIDENCE_LOW_FREQ) return CONFIDENCE_HIGH;
+    return CONFIDENCE_MEDIUM;
+}
+
+// ─── 7.3 Append compacting mismatch records ─────────────
 
 export function appendCompactingMismatchRecord(
     worktree: string,
@@ -532,7 +483,7 @@ export function appendCompactingMismatchRecord(
     }
 }
 
-// ─── 2.4 Compacting canary report ───────────────────────
+// ─── 7.4 Compacting canary report ───────────────────────
 
 export interface CompactingCanaryReport {
     total: number;
@@ -550,30 +501,16 @@ export function generateCompactingCanaryReport(worktree: string): CompactingCana
     let totalCanaryEvals = 0;
     const evalByMismatchType: Record<string, number> = {};
 
-    if (existsSync(shadowPath)) {
-        try {
-            const raw = readFileSync(shadowPath, 'utf-8').trim();
-            if (raw) {
-                const lines = raw.split('\n').filter(Boolean);
-                for (const line of lines) {
-                    try {
-                        const r = JSON.parse(line) as CompactionRelevanceShadowRecord;
-                        if (r.canary?.evaluated === true) {
-                            totalCanaryEvals++;
-                            // Track which mismatch types appeared in this evaluation
-                            const types = new Set(r.canary.mismatches.map(m => m.type));
-                            for (const t of types) {
-                                evalByMismatchType[t] = (evalByMismatchType[t] ?? 0) + 1;
-                            }
-                            // If no mismatches, still count as evaluated (no type to track)
-                        }
-                    } catch {
-                        // skip malformed
-                    }
-                }
+    const shadowRecords = readJsonlFile<CompactionRelevanceShadowRecord>(shadowPath);
+    for (const r of shadowRecords) {
+        if (r.canary?.evaluated === true) {
+            totalCanaryEvals++;
+            // Track which mismatch types appeared in this evaluation
+            const types = new Set(r.canary.mismatches.map(m => m.type));
+            for (const t of types) {
+                evalByMismatchType[t] = (evalByMismatchType[t] ?? 0) + 1;
             }
-        } catch {
-            // read failure — report zeros
+            // If no mismatches, still count as evaluated (no type to track)
         }
     }
 
@@ -581,24 +518,10 @@ export function generateCompactingCanaryReport(worktree: string): CompactingCana
     let totalMismatches = 0;
     const mismatchByType: Record<string, number> = {};
 
-    if (existsSync(mismatchesPath)) {
-        try {
-            const raw = readFileSync(mismatchesPath, 'utf-8').trim();
-            if (raw) {
-                const lines = raw.split('\n').filter(Boolean);
-                for (const line of lines) {
-                    try {
-                        const m = JSON.parse(line) as CompactingCanaryMismatchRecord;
-                        totalMismatches++;
-                        mismatchByType[m.mismatch_type] = (mismatchByType[m.mismatch_type] ?? 0) + 1;
-                    } catch {
-                        // skip malformed
-                    }
-                }
-            }
-        } catch {
-            // read failure
-        }
+    const mismatchRecords = readJsonlFile<CompactingCanaryMismatchRecord>(mismatchesPath);
+    for (const m of mismatchRecords) {
+        totalMismatches++;
+        mismatchByType[m.mismatch_type] = (mismatchByType[m.mismatch_type] ?? 0) + 1;
     }
 
     // Build breakdown by mismatch type
@@ -614,7 +537,7 @@ export function generateCompactingCanaryReport(worktree: string): CompactingCana
     // Promotion candidates: types with >30% mismatch rate
     const promotionCandidates: string[] = [];
     for (const [type, counts] of Object.entries(breakdown)) {
-        if (counts.total > 0 && (counts.mismatches / counts.total) > 0.3) {
+        if (counts.total > 0 && (counts.mismatches / counts.total) > PROMOTION_MISMATCH_RATE) {
             promotionCandidates.push(type);
         }
     }

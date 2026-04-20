@@ -77,12 +77,15 @@ export default {
     const allHooks = [observerHooks, enforcerHooks, improverHooks, orchestratorHooks, extraHooks];
     const merged = mergeEventHandlers(...allHooks);
 
-    const result: Record<string, unknown> = { ...observerHooks, ...enforcerHooks, ...improverHooks, ...orchestratorHooks };
-    for (const [key, handler] of Object.entries(merged)) {
-      result[key] = handler;
+    const result: Record<string, unknown> = { ...merged };
+
+    function mergePermissions(target: Record<string, string>, source: Record<string, string>): void {
+        for (const [key, value] of Object.entries(source)) {
+            if (target[key] === undefined) target[key] = value;
+        }
     }
 
-    (result as Record<string, unknown>).config = async (opencodeConfig: Record<string, unknown>) => {
+    result.config = async (opencodeConfig: Record<string, unknown>) => {
       const agentOverrides = harnessConfig?.agents ?? {};
 
       const allMcpNames = extractKnownMcpNames(opencodeConfig);
@@ -97,25 +100,13 @@ export default {
 
         const overrides = agentOverrides[agent.name];
         const mcpPerms = buildMcpPermissions(overrides?.mcps, allMcpNames);
-        for (const [key, value] of Object.entries(mcpPerms)) {
-          if (mergedPermission[key] === undefined) {
-            mergedPermission[key] = value;
-          }
-        }
+        mergePermissions(mergedPermission, mcpPerms);
 
         const skillPerms = buildSkillPermissions(overrides?.skills, allSkillNames);
-        for (const [key, value] of Object.entries(skillPerms)) {
-          if (mergedPermission[key] === undefined) {
-            mergedPermission[key] = value;
-          }
-        }
+        mergePermissions(mergedPermission, skillPerms);
 
         const toolPerms = buildToolPermissions(overrides?.deny_tools);
-        for (const [key, value] of Object.entries(toolPerms)) {
-          if (mergedPermission[key] === undefined) {
-            mergedPermission[key] = value;
-          }
-        }
+        mergePermissions(mergedPermission, toolPerms);
 
         const { config: agentConfig, _modelArray, _fallbackChain, ...rest } = agent;
         const pluginAgent = {

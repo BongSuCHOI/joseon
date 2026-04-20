@@ -103,6 +103,8 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
         // L4: 도구 실행 전 규칙 체크
         'tool.execute.before': async (input: { tool: string; sessionID: string; callID: string }, output: { args: Record<string, unknown> }) => {
             const argsStr = JSON.stringify(output.args || {});
+            const FILE_TOOLS = new Set(['write', 'edit', 'patch']);
+            const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
 
             // === HARD 규칙: 매칭 시 차단 (throw Error) ===
             for (const rule of hardRules) {
@@ -113,8 +115,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
                         );
                     }
                 }
-                if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
-                    const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
+                if (rule.pattern.scope === 'file' && FILE_TOOLS.has(input.tool)) {
                     if (filePath && !isPluginSource(filePath) && safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH)) {
                         throw new Error(
                             `[HARNESS HARD BLOCK] ${rule.description}\nRule: ${rule.id} | File: ${filePath}`,
@@ -133,8 +134,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
                 if (rule.pattern.scope === 'tool') {
                     matched = safeRegexTest(rule.pattern.match, input.tool, MAX_LENGTH) || safeRegexTest(rule.pattern.match, argsStr, MAX_LENGTH);
                 }
-                if (rule.pattern.scope === 'file' && ['write', 'edit', 'patch'].includes(input.tool)) {
-                    const filePath = (output.args?.filePath as string) || (output.args?.file as string) || '';
+                if (rule.pattern.scope === 'file' && FILE_TOOLS.has(input.tool)) {
                     matched = !!filePath && !isPluginSource(filePath) && safeRegexTest(rule.pattern.match, filePath, MAX_LENGTH);
                 }
                 if (matched) {
@@ -143,7 +143,7 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
             }
 
             // === Scaffold NEVER DO 체크 ===
-            if (['write', 'edit', 'patch'].includes(input.tool)) {
+            if (FILE_TOOLS.has(input.tool)) {
                 const content = ((output.args?.content as string) || (output.args?.newString as string)) || '';
                 for (const pattern of scaffoldPatterns) {
                     const keywords = pattern.toLowerCase().split(/\s+/).filter((w) => w.length > 3);

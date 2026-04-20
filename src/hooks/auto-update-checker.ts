@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-import { HARNESS_DIR, logger } from '../shared/index.js';
+import { HARNESS_DIR, logger, readJsonFile } from '../shared/index.js';
 import { getHarnessSettings, type HarnessConfig } from '../config/index.js';
 
 type PluginMetadata = {
@@ -60,13 +60,7 @@ function getPluginMetadata(startDir: string = moduleDir): PluginMetadata | null 
 }
 
 function loadState(statePath: string): AutoUpdateCheckerState {
-    if (!existsSync(statePath)) return {};
-    try {
-        const parsed = JSON.parse(readFileSync(statePath, 'utf-8')) as AutoUpdateCheckerState;
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-        return {};
-    }
+    return readJsonFile<AutoUpdateCheckerState & object>(statePath, {});
 }
 
 function saveState(statePath: string, state: AutoUpdateCheckerState): void {

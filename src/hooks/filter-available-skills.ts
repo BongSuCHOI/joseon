@@ -2,7 +2,7 @@ import { logger } from '../shared/logger.js';
 import { parseList } from '../shared/utils.js';
 import type { HarnessConfig } from '../config/index.js';
 
-type HookContext = {
+type FilterSkillsContext = {
     harnessConfig?: HarnessConfig;
     sessionAgents: Map<string, string>;
 };
@@ -73,7 +73,7 @@ export function filterAvailableSkillsBlock(systemPrompt: string, allowedSkills: 
     return systemPrompt.replace(match[0], nextBlock);
 }
 
-export function createFilterAvailableSkillsHook(context: HookContext) {
+export function createFilterAvailableSkillsHook(context: FilterSkillsContext) {
     return {
         'chat.params': async (input: { sessionID: string; agent: string }) => {
             context.sessionAgents.set(input.sessionID, input.agent);

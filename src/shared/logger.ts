@@ -39,8 +39,6 @@ function log(level: LogLevel, module: string, message: string, data?: Record<str
     } catch {
         // file write failure is not fatal
     }
-
-
 }
 
 export const logger = {

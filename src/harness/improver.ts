@@ -19,15 +19,23 @@ import type {
     RulePruneCandidateRecord,
     CrossProjectPromotionCandidateRecord,
 } from '../types.js';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
+import { HARNESS_DIR, THIRTY_DAYS_MS, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import { evaluateCompactingCanary, readRecentCompactingShadowRecords, appendCompactingMismatchRecord } from './canary.js';
+
+// ─── File-level constants ──────────────────────────────
+const GIT_COMMAND_TIMEOUT_MS = 5000;
+const DIFF_MAX_CHARS = 12000;
+const DIFF_MAX_LINES = 400;
+const COMPACTION_QUERY_MAX_LENGTH = 1000;
+const FACT_KEYWORD_MAX_LENGTH = 200;
 
 // ─── Helpers ────────────────────────────────────────────
 
 // #5: 정규식 catastrophic backtracking 방지
 // target 길이를 제한하고, 패턴 실행을 보호
+// NOTE: enforcer.ts has a similar function with configurable maxLength; the two intentionally differ
 const REGEX_MAX_TARGET_LENGTH = 10000; // default, overridden by config
 
 function safeRegexTest(pattern: string, target: string): boolean {
@@ -97,6 +105,15 @@ function loadJsonlRecords<T>(filePath: string): T[] {
     }
 }
 
+/** Type-safe wrapper to avoid repeating `as unknown as Record<string, unknown>` */
+const appendRecord = (filePath: string, data: unknown) =>
+    appendJsonlRecord(filePath, data as Record<string, unknown>);
+
+function loadProjectRules(type: 'soft' | 'hard', projectKey: string): Rule[] {
+    return loadJsonFiles<Rule>(join(HARNESS_DIR, `rules/${type}`))
+        .filter((r) => r.project_key === projectKey || r.project_key === 'global');
+}
+
 function getMistakeShadowPath(projectKey: string): string {
     return join(HARNESS_DIR, 'projects', projectKey, 'mistake-pattern-shadow.jsonl');
 }
@@ -129,7 +146,7 @@ function isValidGitHash(hash: string): boolean {
 
 export function buildMistakeSummary(message: string, files: string[], diffText: string): { mistake_summary: string; ambiguous: boolean } {
     const diffLines = diffText.split('\n');
-    const tooLarge = diffText.length > 12000 || diffLines.length > 400;
+    const tooLarge = diffText.length > DIFF_MAX_CHARS || diffLines.length > DIFF_MAX_LINES;
     const fileLabel = files.slice(0, 3).join(', ') || 'unknown-files';
     const addedLines = diffLines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
     const removedLines = diffLines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
@@ -200,13 +217,7 @@ function findOrCreateCandidate(
 ): void {
     const candidates = readMistakeCandidateRecords(projectKey);
     // Find the most recent version of the candidate (append-only JSONL — last entry wins)
-    let existing: MistakePatternCandidate | undefined;
-    for (let i = candidates.length - 1; i >= 0; i--) {
-        if (candidates[i].pattern_identity === patternIdentity.identity) {
-            existing = candidates[i];
-            break;
-        }
-    }
+    const existing = candidates.findLast(c => c.pattern_identity === patternIdentity.identity);
 
     if (existing) {
         // Update existing candidate
@@ -217,9 +228,8 @@ function findOrCreateCandidate(
         if (!existing.mistake_summary_samples.includes(shadowRecord.mistake_summary) && existing.mistake_summary_samples.length < 3) {
             existing.mistake_summary_samples.push(shadowRecord.mistake_summary);
         }
-        // Overwrite the file with updated candidates — append-only means we just append the update as a new record
-        // Actually, let's just append the updated record
-        appendJsonlRecord(getMistakeCandidatePath(projectKey), existing as unknown as Record<string, unknown>);
+        // Append-only JSONL: append updated record (last entry wins on read)
+        appendRecord(getMistakeCandidatePath(projectKey), existing);
     } else if (shadowRecord.affected_files.length > 0 || shadowRecord.commit_message.trim().length > 0) {
         // Only create a new candidate if there's meaningful data
         const candidate: MistakePatternCandidate = {
@@ -235,7 +245,7 @@ function findOrCreateCandidate(
             status: 'pending',
             mistake_summary_samples: [shadowRecord.mistake_summary].slice(0, 3),
         };
-        appendJsonlRecord(getMistakeCandidatePath(projectKey), candidate as unknown as Record<string, unknown>);
+        appendRecord(getMistakeCandidatePath(projectKey), candidate);
     }
 }
 
@@ -274,23 +284,9 @@ export function groupMistakeCandidates(projectKey: string, config?: HarnessConfi
     }
 }
 
-function readMistakeSummaryShadowRecords(projectKey: string): MistakeSummaryShadowRecord[] {
-    const filePath = getMistakeShadowPath(projectKey);
-    if (!existsSync(filePath)) return [];
-
-    try {
-        return readFileSync(filePath, 'utf-8')
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line) as MistakeSummaryShadowRecord);
-    } catch {
-        return [];
-    }
-}
-
 export function appendMistakeSummaryShadow(projectKey: string, hash: string, message: string, files: string[], diffText: string, config?: HarnessConfig): MistakeSummaryShadowRecord {
     const normalizedHash = hash.toLowerCase();
-    const existing = readMistakeSummaryShadowRecords(projectKey).find((record) => record.commit_hash.toLowerCase() === normalizedHash);
+    const existing = loadJsonlRecords<MistakeSummaryShadowRecord>(getMistakeShadowPath(projectKey)).find((record) => record.commit_hash.toLowerCase() === normalizedHash);
     if (existing) {
         return existing;
     }
@@ -307,7 +303,7 @@ export function appendMistakeSummaryShadow(projectKey: string, hash: string, mes
         ambiguous: summary.ambiguous,
     };
 
-    appendJsonlRecord(getMistakeShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    appendRecord(getMistakeShadowPath(projectKey), record);
 
     // Step 5e: trigger candidate grouping after non-ambiguous shadow append
     if (!summary.ambiguous) {
@@ -328,7 +324,7 @@ function readFixDiff(worktree: string, hash: string): string {
         return execSync(`git show --format= --unified=1 --stat=0 ${hash}`, {
             cwd: worktree,
             encoding: 'utf-8',
-            timeout: 5000,
+            timeout: GIT_COMMAND_TIMEOUT_MS,
         });
     } catch {
         return '';
@@ -336,16 +332,14 @@ function readFixDiff(worktree: string, hash: string): string {
 }
 
 function appendAckRecord(projectKey: string, record: AckRecord): void {
-    appendJsonlRecord(getAckStatusPath(projectKey), record as unknown as Record<string, unknown>);
+    appendRecord(getAckStatusPath(projectKey), record);
 }
-
-const PRUNE_CANDIDATE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function isPruneCandidateRule(rule: Rule): boolean {
     if (rule.type !== 'soft') return false;
     if (rule.pattern.scope === 'prompt') return false;
     if (rule.violation_count !== 0) return false;
-    return Date.now() - parseIsoDate(rule.created_at) >= PRUNE_CANDIDATE_AGE_MS;
+    return Date.now() - parseIsoDate(rule.created_at) >= THIRTY_DAYS_MS;
 }
 
 function markPruneCandidates(projectKey: string, pruneGuardEnabled: boolean): void {
@@ -376,7 +370,7 @@ function markPruneCandidates(projectKey: string, pruneGuardEnabled: boolean): vo
             guard_enabled: pruneGuardEnabled,
         };
 
-        appendJsonlRecord(getRulePruneCandidatePath(projectKey), record as unknown as Record<string, unknown>);
+        appendRecord(getRulePruneCandidatePath(projectKey), record);
         appendHistory('rule_prune_candidate_marked', {
             project_key: projectKey,
             rule_id: rule.id,
@@ -437,7 +431,7 @@ function recordCrossProjectPromotionCandidates(projectKey: string, guardEnabled:
             guard_enabled: guardEnabled,
         };
 
-        appendJsonlRecord(candidatePath, record as unknown as Record<string, unknown>);
+        appendRecord(candidatePath, record);
         appendHistory('cross_project_promotion_candidate_recorded', {
             project_key: projectKey,
             candidate_key: candidateKey,
@@ -498,7 +492,7 @@ function appendUpperMemoryExtractShadow(projectKey: string, fact: MemoryFact): U
         content: fact.content,
     };
 
-    appendJsonlRecord(getUpperMemoryShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    appendRecord(getUpperMemoryShadowPath(projectKey), record);
     return record;
 }
 
@@ -550,7 +544,7 @@ function getRecentActivityBoost(value?: string): number {
     const ageMs = Date.now() - parsed;
     if (ageMs <= 24 * 60 * 60 * 1000) return 30;
     if (ageMs <= 7 * 24 * 60 * 60 * 1000) return 20;
-    if (ageMs <= 30 * 24 * 60 * 60 * 1000) return 10;
+    if (ageMs <= THIRTY_DAYS_MS) return 10;
     return 0;
 }
 
@@ -733,7 +727,7 @@ function appendCompactionShadowRecord(
         project_key: projectKey,
         timestamp: new Date().toISOString(),
         filter_enabled: filterEnabled,
-        query: query.slice(0, 1000),
+        query: query.slice(0, COMPACTION_QUERY_MAX_LENGTH),
         max_results: maxResults,
         baseline_selection: {
             soft_rule_ids: plan.baseline_soft_rules.map((rule) => rule.id),
@@ -783,7 +777,7 @@ function appendCompactionShadowRecord(
         }
     }
 
-    appendJsonlRecord(getCompactionShadowPath(projectKey), record as unknown as Record<string, unknown>);
+    appendRecord(getCompactionShadowPath(projectKey), record);
     return record;
 }
 
@@ -978,12 +972,12 @@ function signalToRule(signal: Signal, worktree: string): void {
 
     writeFileSync(rulePath, JSON.stringify(rule, null, 2));
 
-        appendHistory('rule_created', {
-            rule_id: rule.id,
-            signal_id: signal.id,
-            pattern: normalizedPattern,
-            scope: rule.pattern.scope,
-        });
+    appendHistory('rule_created', {
+        rule_id: rule.id,
+        signal_id: signal.id,
+        pattern: normalizedPattern,
+        scope: rule.pattern.scope,
+    });
 
     // Phase 2: 규칙 생성 후 마크다운 동기화
     syncRulesMarkdown(worktree);
@@ -1040,7 +1034,6 @@ function promoteRules(projectKey: string, worktree: string, threshold: number): 
 // ─── 3.4 evaluateRuleEffectiveness — 30일 효과 측정 ────
 
 function evaluateRuleEffectiveness(): void {
-    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const now = Date.now();
 
     for (const type of ['soft', 'hard'] as const) {
@@ -1126,7 +1119,7 @@ function detectFixCommits(worktree: string, projectKey: string, config?: Harness
     try {
         logOutput = execSync(
             `git log --since="${startTime}" --format="COMMIT_START%n%H%n%s" --name-only --no-merges`,
-            { cwd: worktree, encoding: 'utf-8', timeout: 5000 },
+            { cwd: worktree, encoding: 'utf-8', timeout: GIT_COMMAND_TIMEOUT_MS },
         );
     } catch {
         // git 실패 시 조용히 스킵 (non-repo, timeout 등)
@@ -1145,7 +1138,7 @@ function detectFixCommits(worktree: string, projectKey: string, config?: Harness
         if (!isValidGitHash(hash)) continue;
 
         const normalizedHash = hash.toLowerCase();
-        if (readMistakeSummaryShadowRecords(projectKey).some((record) => record.commit_hash.toLowerCase() === normalizedHash)) {
+        if (loadJsonlRecords<MistakeSummaryShadowRecord>(getMistakeShadowPath(projectKey)).some((record) => record.commit_hash.toLowerCase() === normalizedHash)) {
             continue;
         }
 
@@ -1173,10 +1166,8 @@ function detectFixCommits(worktree: string, projectKey: string, config?: Harness
 // ─── 3.6 updateProjectState — 프로젝트 상태 갱신 ────────
 
 function updateProjectState(projectKey: string, worktree: string): void {
-    const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
-        .filter((r) => r.project_key === projectKey || r.project_key === 'global');
-    const hardRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/hard'))
-        .filter((r) => r.project_key === projectKey || r.project_key === 'global');
+    const softRules = loadProjectRules('soft', projectKey);
+    const hardRules = loadProjectRules('hard', projectKey);
     const pendingSignals = loadJsonFiles<Signal>(join(HARNESS_DIR, 'signals/pending'))
         .filter((s) => s.project_key === projectKey);
 
@@ -1245,7 +1236,7 @@ function indexSessionFacts(projectKey: string): void {
                 for (const pattern of MEMORY_KEYWORDS) {
                     const match = textToSearch.match(pattern);
                     if (match && match[1]) {
-                        const keyword = match[1].trim().slice(0, 200); // 길이 제한
+                        const keyword = match[1].trim().slice(0, FACT_KEYWORD_MAX_LENGTH); // 길이 제한
                         extractedFacts.push({
                             keywords: [pattern.source.replace(/\\s\*\(.*/, '').toLowerCase(), keyword.toLowerCase()],
                             content: keyword,
@@ -1314,16 +1305,14 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     }
 
     // HARD 규칙 설명 주입
-    const hardRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/hard'))
-        .filter((r) => r.project_key === projectKey || r.project_key === 'global');
+    const hardRules = loadProjectRules('hard', projectKey);
     if (hardRules.length > 0) {
         const descriptions = hardRules.map((r) => `- [HARD] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
         parts.push(`[HARNESS HARD RULES — MUST follow]\n${descriptions}`);
     }
 
     // SOFT 규칙 설명 주입 (scope:prompt의 유일한 강제 수단)
-    const softRules = loadJsonFiles<Rule>(join(HARNESS_DIR, 'rules/soft'))
-        .filter((r) => r.project_key === projectKey || r.project_key === 'global');
+    const softRules = loadProjectRules('soft', projectKey);
     const facts = loadJsonFiles<MemoryFact>(join(HARNESS_DIR, 'memory/facts'));
 
     // Phase 3: Memory Search — 관련 fact 주입
@@ -1353,7 +1342,7 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
         parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
     }
 
-    return buildBoundedCompactionContext(parts, 12000);
+    return buildBoundedCompactionContext(parts, DIFF_MAX_CHARS);
 }
 
 // ─── 3.1 Main Plugin Export ─────────────────────────────

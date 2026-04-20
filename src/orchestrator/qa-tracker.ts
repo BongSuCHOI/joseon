@@ -1,7 +1,7 @@
 // src/orchestrator/qa-tracker.ts — QA 시나리오별 실패 추적
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR } from '../shared/index.js';
+import { HARNESS_DIR, readJsonFile } from '../shared/index.js';
 import type { QAFailures, QAFailureDetail } from '../types.js';
 import type { HarnessSettings } from '../config/index.js';
 import { DEFAULT_HARNESS_SETTINGS } from '../config/index.js';
@@ -16,13 +16,7 @@ function getQAFailuresPath(projectKey: string): string {
 }
 
 function readQAFailures(filePath: string): QAFailures {
-    if (!existsSync(filePath)) return {};
-
-    try {
-        return JSON.parse(readFileSync(filePath, 'utf-8')) as QAFailures;
-    } catch {
-        return {};
-    }
+    return readJsonFile<QAFailures>(filePath, {});
 }
 
 /**
