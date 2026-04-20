@@ -18,7 +18,7 @@
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | `.opencode/rules/` + Memory Index/Search + history 로테이션 | ✅ 완료 |
 | 4 | 오케스트레이션 | + orchestrator (서브에이전트 라우팅, QA 추적 연동) | ✅ 완료 |
-| 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 default-off 또는 passive-only) |
+| 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 활성화 — .opencode/harness.jsonc에서 토글 ON) |
 
 ---
 
@@ -126,7 +126,7 @@ HARD 승격 (rules/hard/{id}.json)
 
 Step 5f에서 추가된 metadata-based canary evaluation 모듈이다.
 
-- **default-off:** `canary_enabled = false` 상태로 시작
+- **활성화:** `canary_enabled = true` (.opencode/harness.jsonc)
 - **동작:** deterministic 판정과 메타데이터 기반 평가를 비교
 - **불일치 기록:** mismatch 발생 시 `canary-mismatches.jsonl`에 append
 - **집계 리포트:** mismatch율, 패턴별 분포, 승격 후보 판정을 제공
@@ -203,12 +203,12 @@ bash tool output → test failure 패턴 감지 (orchestrator hook)
 
 | 단계 | 현재 상태 | 설명 |
 |------|----------|------|
-| **Extract** | shadow only (`memory-upper-shadow.jsonl`) | 세션에서 결정/선호/제약 추출 후보만 기록 |
-| **Consolidate** | 미구현 | 중복/충돌/진화 정리 |
-| **Relate** | 미구현 | fact 간 관계 연결 |
+| **Extract** | ✅ 활성 — 세션에서 결정/선호/제약 키워드 추출 | 세션에서 결정/선호/제약 추출 후보만 기록 |
+| **Consolidate** | ✅ 활성 | Jaccard 유사도 + union-find로 중복 fact 병합 (consolidateFacts) |
+| **Relate** | ✅ 활성 | 키워드 기반 fact 관계 연결 (relateFacts, relations.jsonl) |
 | **Recall** | 미구현 | 다양한 회수 경로 |
 
-상위 4단계는 데이터 충분히 축적 후 활성화 예정. 자세한 승격 기준은 `docs/roadmap.md` 참조.
+Recall만 미구현. Consolidate/Relate는 활성화 완료.
 
 ---
 
@@ -238,7 +238,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 
 ### 현재 활성화 상태
 
-**모든 5a~5h 기능은 default-off 또는 passive-only.** 본 경로 롤아웃은 아직 아니다.
+**모든 5a~5h 토글이 .opencode/harness.jsonc에서 활성화됨.** 실제 판정 경로에 반영 중.
 승격 판단 기준과 근거는 `docs/roadmap.md` 참조.
 
 ---
@@ -289,7 +289,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 | ~~Phase 구조~~ | Phase 0~4 다단계 LLM 판정 | 제거됨 (`signalToRule()` 결정적 코드로 대체) | 플러그인에서 LLM 호출 불가 + 비결정성 회피 |
 | Cross-Project 승격 | 2개 프로젝트에서 동일 패턴 → global 자동 승격 | 수동 `project_key: 'global'` | 단일 프로젝트 환경, 오버엔지니어링 |
 | Pruning | 효과 없는 규칙 자동 삭제 | 측정만 자동, 삭제는 수동 | 삭제 기준 오류 시 복구 불가 |
-| Memory 상위 4단계 | 7단계 전체 구현 | 하위 3단계만 | 데이터 축적 선행 필요 |
+| Memory 상위 4단계 | 7단계 전체 구현 | 하위 3단계 + Consolidate/Relate (5/7) | Recall만 미구현 |
 | Event 훅 병합 | 스프레드 연산자 (v3 버그) | `mergeEventHandlers` 유틸리티 | 오라클 크로스 리뷰에서 발견한 CRITICAL 버그 수정 |
 
 ---
@@ -336,7 +336,8 @@ src/
 │   └── memory/
 │       ├── archive/          # 세션 JSONL 아카이브
 │       ├── index/            # 키워드 인덱스
-│       └── search/           # 검색 결과
+│       ├── search/           # 검색 결과
+│       └── relations.jsonl   # fact 간 키워드 기반 관계 (relate 단계)
 ├── events.jsonl              # 이벤트 로그
 └── sessions/                 # 세션 관리
 ```

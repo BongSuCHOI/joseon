@@ -81,7 +81,7 @@ Smoke 테스트는 개별 실행:
 ./node_modules/.bin/tsx test/smoke-test-step4.ts
 ```
 
-### Test Files (14개, 571 assertions)
+### Test Files (14개, 564 assertions)
 
 | 파일 | Assertions |
 |------|-----------|
@@ -109,7 +109,7 @@ Smoke 테스트는 개별 실행:
 | Step 3 | 브릿지 | 통과 |
 | Step 4 | 오케스트레이션 | 통과 |
 | Step 5a~5h | shadow/guarded 기능 | 통과 |
-| Simplify | readability + Phase 제거 + error-recovery 제거 | 571/571 |
+| Simplify + consolidate/relate | readability + Phase 제거 + error-recovery 제거 + 메모리 병합/관계 | 564/564 |
 
 ---
 

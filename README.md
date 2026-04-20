@@ -94,7 +94,7 @@ SOFT 규칙 생성 (rules/soft/)
 | **observer** | `src/harness/observer.ts` | L1 도구 실행 로깅 + L2 에러/불만 signal 생성 |
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
 | **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping |
-| **canary** | `src/harness/canary.ts` | Step 5f: metadata-based phase/signal canary evaluation (default-off, `canary_enabled`, mismatch detection, aggregation report) |
+| **canary** | `src/harness/canary.ts` | Step 5f/5g: metadata-based phase/signal + compacting canary evaluation (`canary_enabled`, `compacting_canary_enabled`, mismatch detection) |
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
 | **orchestrator** | `src/orchestrator/orchestrator.ts` | Plugin 4: qa-tracker wiring + agent_id injection + 4개 플러그인 통합 진입점 (Step 4D~4f) |
@@ -121,7 +121,8 @@ SOFT 규칙 생성 (rules/soft/)
 ├── scaffold/               # scaffold 파일 (global.md)
 ├── memory/
 │   ├── facts/              # Memory Index — 추출된 키워드 fact
-│   └── archive/            # 세션 아카이브
+│   ├── relations.jsonl     # fact 간 키워드 기반 관계 (relate 단계)
+│   └── archive/            # 세션 아카이브 (consolidate 시 이동)
 ├── projects/
 │   ├── {key}/
 │   │   ├── state.json               # 프로젝트 상태
@@ -132,8 +133,8 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── compacting-relevance-shadow.jsonl # reduced-safe 5b compacting shadow 로그
 │   │   ├── rule-prune-candidates.jsonl # Step 5c prune candidate log
 │   │   ├── mistake-pattern-candidates.jsonl # Step 5e mistake pattern candidate log
-│   │   ├── canary-mismatches.jsonl # Step 5f canary mismatch log (default-off)
-│   │   ├── compacting-canary-mismatches.jsonl # Step 5g compacting canary mismatch log (default-off)
+│   │   ├── canary-mismatches.jsonl # Step 5f canary mismatch log
+│   │   ├── compacting-canary-mismatches.jsonl # Step 5g compacting canary mismatch log
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -155,12 +156,12 @@ npm run deploy
 
 ### reduced-safe Step 5b 설정
 
-`semantic_compacting_enabled`는 기본값이 `false`다. 끄면 기존 compacting 선택 결과를 유지하고, `compacting-relevance-shadow.jsonl`에 shadow 비교만 남긴다.
+`semantic_compacting_enabled`는 `.opencode/harness.jsonc`에서 `true`로 활성화되어 있다. 끄면 기존 compacting 선택 결과를 유지하고, `compacting-relevance-shadow.jsonl`에 shadow 비교만 남긴다.
 
 ```jsonc
 {
   "harness": {
-    "semantic_compacting_enabled": false
+    "semantic_compacting_enabled": true // 활성화됨
   }
 }
 ```
@@ -191,24 +192,24 @@ npm run deploy
 
 ### Step 5f phase/signal canary 설정
 
-`canary_enabled`는 metadata-based canary evaluation 활성화 여부다. 기본값은 `false`. 켜면 저신뢰도 phase/signal 판정 상황에서 메타데이터 기반 평가를 수행하고, deterministic과 불일치하면 `canary-mismatches.jsonl`에 기록한다. 실제 phase/signal 판정은 변경하지 않는다.
+`canary_enabled`는 metadata-based canary evaluation 활성화 여부다. schema 기본값은 `false`이나 `.opencode/harness.jsonc`에서 `true`로 활성화. 켜면 저신뢰도 phase/signal 판정 상황에서 메타데이터 기반 평가를 수행하고, deterministic과 불일치하면 `canary-mismatches.jsonl`에 기록한다. 실제 phase/signal 판정은 변경하지 않는다.
 
 ```jsonc
 {
   "harness": {
-    "canary_enabled": false
+    "canary_enabled": true // 활성화됨
   }
 }
 ```
 
 ### Step 5g compacting canary 설정
 
-`compacting_canary_enabled`는 metadata-based compacting canary evaluation 활성화 여부다. 기본값은 `false`. 켜면 compacting shadow record에서 baseline과 semantic 선택 간 차이를 평가하고, 불일치하면 `compacting-canary-mismatches.jsonl`에 기록한다. 실제 compacting 선택은 변경하지 않는다. `semantic_compacting_enabled`와 독립적으로 동작한다.
+`compacting_canary_enabled`는 metadata-based compacting canary evaluation 활성화 여부다. schema 기본값은 `false`이나 `.opencode/harness.jsonc`에서 `true`로 활성화. 켜면 compacting shadow record에서 baseline과 semantic 선택 간 차이를 평가하고, 불일치하면 `compacting-canary-mismatches.jsonl`에 기록한다. 실제 compacting 선택은 변경하지 않는다. `semantic_compacting_enabled`와 독립적으로 동작한다.
 
 ```jsonc
 {
   "harness": {
-    "compacting_canary_enabled": false
+    "compacting_canary_enabled": true // 활성화됨
   }
 }
 ```
@@ -220,7 +221,7 @@ npm run deploy
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
-├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate, ConsolidationRecord, FactRelation 타입 정의
 ├── config/                      # A2: 설정 시스템
 │   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
 │   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
@@ -242,8 +243,8 @@ src/
 ├── harness/
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
-│   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프
-│   └── canary.ts                # Step 5f: metadata-based phase/signal canary evaluation
+│   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프 + Memory consolidate/relate
+│   └── canary.ts                # Step 5f/5g: metadata-based phase/signal + compacting canary evaluation
 ├── orchestrator/
 │   ├── orchestrator.ts          # Plugin 4: qa-tracker wiring + agent_id injection (Step 4D~4f)
 │   ├── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)

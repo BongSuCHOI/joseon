@@ -46,7 +46,7 @@ src/
 
 | 문서 | 내용 |
 |------|------|
-| [`docs/architecture.md`](docs/architecture.md) | 전체 시스템 아키텍처 (하네스 4단계, L1~L6, 폐루프, 메모리, shadow/guarded-off) |
+| [`docs/architecture.md`](docs/architecture.md) | 전체 시스템 아키텍처 (하네스 4단계, L1~L6, 폐루프, 메모리 consolidate/relate) |
 | [`docs/conventions.md`](docs/conventions.md) | 코딩 규칙, 플러그인 export 패턴, import 규칙 |
 | [`docs/development.md`](docs/development.md) | 개발/빌드/테스트 절차, OpenSpec 워크플로우 |
 | [`docs/roadmap.md`](docs/roadmap.md) | 향후 고도화 로드맵 (shadow→guarded→mainline 승격 기준) |

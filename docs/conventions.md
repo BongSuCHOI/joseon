@@ -9,7 +9,7 @@ src/
 ├── harness/                     # 하네스 레이어 (Step 1~2, 5f)
 │   ├── observer.ts              # L1 관측 + L2 신호 변환
 │   ├── enforcer.ts              # L4 HARD 차단 + SOFT 위반 추적
-│   ├── improver.ts              # L5 자가개선 + L6 폐루프
+│   ├── improver.ts              # L5 자가개선 + L6 폐루프 + Memory consolidate/relate
 │   └── canary.ts                # metadata-based canary evaluation
 │
 ├── orchestrator/                # 오케스트레이션 레이어 (Step 4)
