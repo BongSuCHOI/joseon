@@ -157,6 +157,5 @@ One-sentence rationale.
 
 - `.opencode/rules/` HARD violations → always 🔴 Critical
 - `.opencode/rules/` SOFT violations → 🟡 Important
-- Phase state files should never be modified by the change under review — flag as 🔴 if they are
 
 </Harness>

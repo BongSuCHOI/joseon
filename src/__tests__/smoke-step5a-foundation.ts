@@ -7,7 +7,6 @@ import { tmpdir } from 'os';
 
 import { HarnessObserver } from '../harness/observer.js';
 import { HarnessImprover, appendMistakeSummaryShadow } from '../harness/improver.js';
-import { getPhaseState, transitionPhase } from '../orchestrator/phase-manager.js';
 import { HARNESS_DIR, getProjectKey } from '../shared/index.js';
 
 let passed = 0;
@@ -114,17 +113,7 @@ async function main(): Promise<void> {
         shadowRecords = readJsonl(shadowPath);
         assert(shadowRecords.some((record) => (record.deterministic as { signal_type?: string }).signal_type === 'user_feedback'), 'user feedback candidate logged to shadow file');
 
-        console.log('\n[2] phase transition appends shadow record without changing phase schema');
-        const beforePhase = getPhaseState(testDir);
-        assert(beforePhase.current_phase === 1, 'baseline phase starts at 1');
-        const state = transitionPhase(testDir, 2);
-        assert(state.current_phase === 2, 'deterministic phase transition still succeeds');
-        const phaseFile = JSON.parse(readFileSync(join(opencodeDir, 'orchestrator-phase.json'), 'utf-8')) as Record<string, unknown>;
-        assert(!Object.prototype.hasOwnProperty.call(phaseFile, 'shadow'), 'phase file schema stays deterministic');
-        shadowRecords = readJsonl(shadowPath);
-        assert(shadowRecords.some((record) => record.kind === 'phase' && (record.deterministic as { phase_to?: number }).phase_to === 2 && (record.context as { transition_status?: string } | undefined)?.transition_status === 'applied'), 'phase shadow record appended separately');
-
-        console.log('\n[3] guarded ack writes written+accepted only when acceptance passes');
+        console.log('\n[2] guarded ack writes written+accepted only when acceptance passes');
         writeFileSync(validSignalFile, JSON.stringify({
             id: 'step5a-valid',
             type: 'error_repeat',
@@ -162,7 +151,7 @@ async function main(): Promise<void> {
         assert(ackRecords.some((record) => record.signal_id === 'step5a-invalid' && record.state === 'written' && record.accepted === false), 'invalid signal stays in written state under guard');
         assert(!ackRecords.some((record) => record.signal_id === 'step5a-invalid' && record.state === 'accepted'), 'invalid signal is not promoted to accepted');
 
-        console.log('\n[4] guard disabled preserves written-only flow');
+        console.log('\n[3] guard disabled preserves written-only flow');
         writeFileSync(defaultSignalFile, JSON.stringify({
             id: 'step5a-default',
             type: 'error_repeat',
@@ -185,7 +174,7 @@ async function main(): Promise<void> {
         assert(ackRecordsAfterDefault.some((record) => record.signal_id === 'step5a-default' && record.state === 'written' && record.guard_enabled === false), 'guard disabled keeps written ack only');
         assert(!ackRecordsAfterDefault.some((record) => record.signal_id === 'step5a-default' && record.state === 'accepted'), 'guard disabled does not create accepted ack');
 
-        console.log('\n[5] diff mistake summaries stay append-only shadow logs');
+        console.log('\n[4] diff mistake summaries stay append-only shadow logs');
         appendMistakeSummaryShadow(projectKey, 'abcdef1', 'fix: trim shadow noise', ['src/example.ts'], [
             'diff --git a/src/example.ts b/src/example.ts',
             '--- a/src/example.ts',

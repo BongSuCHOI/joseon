@@ -5,7 +5,6 @@ import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { getPhaseState, transitionPhase, resetPhase } from '../src/orchestrator/phase-manager.js';
 import { attemptRecovery } from '../src/orchestrator/error-recovery.js';
 import { trackQAFailure } from '../src/orchestrator/qa-tracker.js';
 import { createAgents } from '../src/agents/agents.js';
@@ -17,7 +16,6 @@ import { filterAvailableSkillsBlock } from '../src/hooks/filter-available-skills
 import { createForegroundFallbackController, isRetryableModelFailure } from '../src/hooks/foreground-fallback.js';
 import { createFilterAvailableSkillsHook } from '../src/hooks/filter-available-skills.js';
 import { createForegroundFallbackHook } from '../src/hooks/foreground-fallback.js';
-import { createPhaseReminderHook } from '../src/hooks/phase-reminder.js';
 
 let passed = 0;
 let failed = 0;
@@ -32,13 +30,6 @@ function assert(condition: boolean, msg: string): void {
     }
 }
 
-// Phase Manager는 worktree 기반 → 임시 디렉토리
-const testDir = join(tmpdir(), `step4-integration-test-${Date.now()}`);
-const opencodeDir = join(testDir, '.opencode');
-const docsDir = join(testDir, 'docs');
-mkdirSync(opencodeDir, { recursive: true });
-mkdirSync(docsDir, { recursive: true });
-
 // Error Recovery / QA Tracker는 HARNESS_DIR/projects/{key} 기반
 const testProjectKey = `test-step4-${Date.now()}`;
 const testProjectDir = join(HARNESS_DIR, 'projects', testProjectKey);
@@ -52,59 +43,9 @@ try {
     console.log('========================================\n');
 
     // ============================================================
-    // 1. Phase Manager Integration (Phase lifecycle)
+    // 1. Error Recovery Integration
     // ============================================================
-    console.log('--- 1. Phase Manager Integration ---\n');
-
-    // 1-1. 초기 상태 — Phase 1
-    console.log('[1-1] 초기 상태');
-    const init = getPhaseState(testDir);
-    assert(init.current_phase === 1, '초기 current_phase === 1');
-    assert(init.phase_history.length === 0, '초기 phase_history 비어있음');
-
-    // 1-2. Phase 1 → 2 전환
-    console.log('\n[1-2] Phase 1 → 2 전환');
-    const s2 = transitionPhase(testDir, 2);
-    assert(s2.current_phase === 2, 'current_phase === 2');
-    assert(s2.phase_history.length >= 2, 'phase_history에 2개 이상 항목');
-
-    // 1-3. Phase 2 → 3 차단 (qa-test-plan.md 없음)
-    console.log('\n[1-3] Phase 3 진입 차단 (Phase 2.5 gate)');
-    let blocked = false;
-    try {
-        transitionPhase(testDir, 3);
-    } catch (err) {
-        blocked = (err as Error).message.includes('[ORCHESTRATOR BLOCK]');
-    }
-    assert(blocked, 'qa-test-plan.md 없으면 Phase 3 진입 차단');
-
-    // 1-4. qa-test-plan.md 생성 후 Phase 3 진입
-    console.log('\n[1-4] qa-test-plan.md 생성 후 Phase 3 진입');
-    writeFileSync(join(docsDir, 'qa-test-plan.md'), '# QA Test Plan\n');
-    const s3 = transitionPhase(testDir, 3);
-    assert(s3.current_phase === 3, 'current_phase === 3');
-    assert(s3.qa_test_plan_exists === true, 'qa_test_plan_exists === true');
-
-    // 1-5. Phase 3 → 4 전환
-    console.log('\n[1-5] Phase 3 → 4 전환');
-    const s4 = transitionPhase(testDir, 4);
-    assert(s4.current_phase === 4, 'current_phase === 4');
-
-    // 1-6. Phase 4 → 5 전환
-    console.log('\n[1-6] Phase 4 → 5 전환');
-    const s5 = transitionPhase(testDir, 5);
-    assert(s5.current_phase === 5, 'current_phase === 5');
-
-    // 1-7. Phase 리셋
-    console.log('\n[1-7] Phase 리셋');
-    const reset = resetPhase(testDir);
-    assert(reset.current_phase === 1, '리셋: current_phase === 1');
-    assert(reset.phase_history.length === 0, '리셋: phase_history 비어있음');
-
-    // ============================================================
-    // 2. Error Recovery Integration
-    // ============================================================
-    console.log('\n--- 2. Error Recovery Integration ---\n');
+    console.log('\n--- 1. Error Recovery Integration ---\n');
 
     // 2-1. Stage 1 에러 복구
     console.log('[2-1] Stage 1 (direct_fix)');
@@ -415,21 +356,8 @@ try {
     // ============================================================
     console.log('\n--- 5B. Stability Follow-up Hooks ---\n');
 
-    // 5B-1. phase reminder targets orchestrator only
-    console.log('[5B-1] orchestrator phase reminder');
-    const phaseReminderHook = createPhaseReminderHook();
-    const phaseMessages = {
-        messages: [
-            { info: { role: 'assistant', agent: 'frontend' }, parts: [{ type: 'text', text: 'frontend work' }] },
-            { info: { role: 'assistant', agent: 'orchestrator' }, parts: [{ type: 'text', text: 'route this task' }] },
-        ],
-    };
-    await phaseReminderHook['experimental.chat.messages.transform']({} as Record<string, never>, phaseMessages as any);
-    assert(phaseMessages.messages[0].parts.length === 1, 'phase reminder: non-orchestrator message unchanged');
-    assert(phaseMessages.messages[1].parts.some((part: any) => typeof part.text === 'string' && part.text.includes('Orchestrator workflow rules')), 'phase reminder: orchestrator message gets reminder');
-
-    // 5B-2. delegate-task-retry advertises current roster
-    console.log('[5B-2] delegate-task-retry agent guidance');
+    // 5B-1. delegate-task-retry advertises current roster
+    console.log('[5B-1] delegate-task-retry agent guidance');
     const delegateTaskRetryHook = createDelegateTaskRetryHook();
     await delegateTaskRetryHook['tool.execute.after']({ tool: 'task' }, { output: 'could not find agent named whatever' } as any);
     const retrySystem = { system: [] as string[] };
@@ -851,8 +779,7 @@ try {
     console.log(`  Results: ${passed} passed, ${failed} failed`);
     console.log('========================================\n');
 } finally {
-    // 정리: 임시 worktree + HARNESS_DIR 하위 테스트 프로젝트
-    rmSync(testDir, { recursive: true, force: true });
+    // 정리: HARNESS_DIR 하위 테스트 프로젝트
     rmSync(testProjectDir, { recursive: true, force: true });
 }
 

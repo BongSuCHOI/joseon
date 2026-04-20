@@ -64,19 +64,6 @@ export interface ProjectState {
 
 // Step 4: 오케스트레이션 타입
 
-export interface PhaseHistoryEntry {
-    phase: number;
-    entered_at: string;
-    completed_at?: string;
-}
-
-export interface PhaseState {
-    current_phase: number;        // 1~5
-    phase_history: PhaseHistoryEntry[];
-    qa_test_plan_exists: boolean;
-    incomplete_phase?: number;    // 마지막 history entry에 completed_at 없으면 설정
-}
-
 export interface QAFailureDetail {
     timestamp: string;
     message: string;

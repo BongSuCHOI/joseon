@@ -155,7 +155,6 @@ For non-trivial turns, briefly note which skill or chain was used or explicitly 
 
 - HARD rules in `.opencode/rules/` are auto-enforced. Read block messages for alternatives.
 - SOFT rules are guidelines — follow unless user overrides.
-- Phase state files (`orchestrator-phase.json` etc.) — do NOT modify directly.
 - User can switch agents via tab; your work pauses. On resume, check current state before continuing.
 
 </Harness>

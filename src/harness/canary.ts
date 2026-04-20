@@ -201,7 +201,7 @@ export function appendMismatchRecord(
 
 /**
  * Run canary evaluation on a shadow record and, if applicable,
- * append a mismatch record. Called from phase-manager and observer
+ * append a mismatch record. Called from observer
  * after their initial shadow append.
  *
  * Returns the updated shadow record with populated shadow block,

@@ -5,7 +5,7 @@ import { createForegroundFallbackController, createForegroundFallbackHook } from
 import { createAutoUpdateCheckerHook } from './auto-update-checker.js';
 import { createPostFileToolNudgeHook } from './post-file-tool-nudge.js';
 import { createPostReadNudgeHook } from './post-read-nudge.js';
-import { createPhaseReminderHook } from './phase-reminder.js';
+
 import type { HarnessConfig } from '../config/index.js';
 import type { AgentDefinition } from '../agents/agents.js';
 
@@ -28,7 +28,7 @@ export function createAllHooks(context: HookContext): Record<string, (...args: u
         createJsonErrorRecoveryHook(),
         createPostFileToolNudgeHook(),
         createPostReadNudgeHook(),
-        createPhaseReminderHook(),
+
         createAutoUpdateCheckerHook({ harnessConfig: context.harnessConfig }),
         createFilterAvailableSkillsHook({ harnessConfig: context.harnessConfig, sessionAgents: context.sessionAgents }),
         createForegroundFallbackHook({ worktree: context.worktree, agentsByName: context.agentsByName, fallbackEnabled: context.fallbackEnabled, client: context.client }, context.foregroundFallback),
