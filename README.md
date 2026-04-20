@@ -24,7 +24,7 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 1 | 하네스 초안 | observer + enforcer | ✅ 완료 |
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
-| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5g 구현/검증 완료 (phase/signal canary smoke 77/77, compacting canary smoke 74/74 통과) |
+| 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5h 구현/검증 완료 (phase/signal canary smoke 77/77, compacting canary smoke 74/74, ack acceptance smoke 192/192 통과) |
 
 ### 핵심 원칙
 

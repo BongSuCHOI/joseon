@@ -48,7 +48,7 @@ Step 5a는 foundation, Step 5b는 reduced-safe shadow slice, Step 5c는 rule lif
 | 3. 의미 기반 compacting 필터    | relevance shadow + compacting canary evaluation (Step 5g) | default-off shadow + canary |
 | 4. LLM 기반 Phase / signal 판정 | 결정적 baseline + phase/signal 그림자 로그 + metadata-based canary evaluation (Step 5f) | shadow + canary |
 | 5. diff 기반 실수 패턴 학습     | fix 흐름 + mistake_summary 그림자 로그 + candidate grouping (Step 5e) | guarded-shadow     |
-| 6. Ack 조건 강화                | written/accepted ack 로그 + default-off guard | guarded            |
+| 6. Ack 조건 강화                | written/accepted ack 로그 + multi-check evaluator (3 checks) (Step 5h) | guarded + passive-only |
 | 7. Cross-Project 자동 승격      | exact-match candidate aggregation + 수동 `global` 가능 | guarded-off        |
 | 8. auto-update-checker          | 완료 — warn-only 세션 시작 체크 + 전역 24h 쿨다운 상태 파일 | default-off        |
 
@@ -635,7 +635,7 @@ plugin 훅이 canary 평가 요청을 파일에 기록
 
 ### 현재 상태
 
-Step 5a로 `ack-status.jsonl`에 `written` / `accepted`를 분리 기록한다. `ack_guard_enabled`는 기본값이 false라 accepted는 가드가 켜질 때만 기록된다.
+Step 5a로 `ack-status.jsonl`에 `written` / `accepted`를 분리 기록한다. `ack_guard_enabled`는 기본값이 false라 accepted는 가드가 켜질 때만 기록된다. Step 5h로 단일 `rule_written` 체크에서 3-check evaluator(`rule_written` + `rule_valid` + `not_prune_candidate`)로 확장했다. 현재는 passive-only (시스템 효과 없음).
 
 ### 의도
 
@@ -680,11 +680,67 @@ ack는 상태 전이의 마지막 문턱이어야 한다. 그런데 write 성공
 
 ack는 결국 "파일이 써졌는가"가 아니라 "목적을 만족했는가"로 바뀌어야 한다.
 
+### Step 5h 탐색 결과 — Ack Acceptance Plane 설계
+
+> 탐색 일시: 2026-04-20. 코드 조사 기반으로 판정 근거를 정리.
+> 이 섹션은 propose/apply 단계에서 설계 참고 자료로 사용.
+
+#### 설계 결정: 3가지 탐색 질문
+
+**Q1: effectiveness_confirmed 체크를 포함하는가?**
+
+| 옵션 | 설명 | 판단 |
+|------|------|------|
+| A: metadata-only | rule_written, rule_valid, not_prune_candidate만 | ✅ 채택 |
+| B: +effectiveness | effectiveness.status === 'confirmed' 추가 | ❌ |
+
+근거: effectiveness는 30일 주기로 측정되는데 ack evaluation은 즉시 발생한다. 타이밍 불일치로 인해 유효한 규칙도 fail 처리될 위험이 크다. 데이터 축적 후 재검토.
+
+**Q2: no_recent_recurrence 체크를 포함하는가?**
+
+| 옵션 | 설명 | 판단 |
+|------|------|------|
+| A: 포함 안 함 | recurrence check 없이 3개 체크만 | ✅ 채택 |
+| B: +no_recent_recurrence | 최근 N일 내 동일 패턴 재발 없음 | ❌ |
+
+근거: accepted 취소/강등 메커니즘이 아직 없다 (YAGNI). recurrence가 감지되어도 accepted를 되돌릴 수 없으므로, 체크만 추가하면 오탐이 불가능한 상태가 된다. 메커니즘 구축 후 재검토.
+
+**Q3: 시스템 효과를 부여하는가?**
+
+| 옵션 | 설명 | 판단 |
+|------|------|------|
+| A: passive only | ack record에 결과 기록만, 시스템 동작 변경 없음 | ✅ 채택 |
+| B: +active effects | prune protection, compacting priority boost 등 | ❌ |
+
+근거: 3개 체크는 모두 shallow (file exists, JSON parses, flag absent). shallow check에 active effect를 부여하면 check depth와 benefit scope 간 불일치가 발생한다. deep check 추가 후 active effect 검토.
+
+#### Step 5h 구현 결과
+
+| 항목 | 내용 |
+|------|------|
+| `AckAcceptanceCheckFailure` | `{ check: string, reason: string }` 타입 |
+| `AckAcceptanceResult` | `{ verdict: 'accepted' \| 'rejected', checks_passed: string[], checks_failed: AckAcceptanceCheckFailure[] }` |
+| `evaluateAckAcceptance()` | 3-check 순차 evaluator |
+| `AckRecord` 확장 | `acceptance_checks_passed`, `acceptance_checks_failed`, `acceptance_verdict` (optional) |
+| 테스트 | smoke-step5h-ack-acceptance.ts, 41/41 통과 |
+| 총 테스트 | 192/192 (5a:22 + 5e:13 + 5f:42 + 5g:74 + 5h:41) |
+
+#### 후속 로드맵
+
+| 후속 | 체크 | 활성 조건 | 시스템 효과 |
+|------|------|-----------|-------------|
+| A | `effectiveness_confirmed` | 30일 규칙 축적 + effectiveness 측정 안정화 | 없음 (passive) |
+| B | `no_recent_recurrence` | accepted record 50+ + accepted 취소/강등 메커니즘 구축 | 없음 (passive) |
+| C | `not_false_positive` | canary mismatch 데이터 축적 | 없음 (passive) |
+| A+B+C 이후 | — | shallow + deep check 모두 안정 | prune protection, compacting priority boost 검토 |
+
 ### 아직 비활성
 
 - `accepted`의 기본 활성화
 - 검증 실패 시 즉시 ack 거부하는 강제 모드
 - writing 성공만으로 완료 처리하는 옛 의미의 ack 복귀
+- accepted 취소/강등 메커니즘
+- active effects (prune protection, compacting priority boost)
 
 ---
 

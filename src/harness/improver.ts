@@ -12,6 +12,7 @@ import type {
     MistakeSummaryShadowRecord,
     MistakePatternCandidate,
     AckRecord,
+    AckAcceptanceResult,
     MemoryFact,
     UpperMemoryExtractShadowRecord,
     CompactionRelevanceShadowRecord,
@@ -449,24 +450,6 @@ function recordCrossProjectPromotionCandidates(projectKey: string, guardEnabled:
     }
 }
 
-export function evaluateAckAcceptance(signal: Signal, ackPath: string): { accepted: boolean; reason: string; acceptance_check: 'rule_written' } {
-    if (!existsSync(ackPath)) {
-        return { accepted: false, reason: 'written_ack_missing', acceptance_check: 'rule_written' };
-    }
-
-    const pattern = signal.payload.pattern || signal.payload.description;
-    if (!pattern) {
-        return { accepted: false, reason: 'missing_signal_pattern', acceptance_check: 'rule_written' };
-    }
-
-    const normalizedPattern = signal.type === 'fix_commit' ? escapeRegexLiteral(pattern) : pattern;
-    if (!ruleExists(normalizedPattern, signal.project_key)) {
-        return { accepted: false, reason: 'rule_not_persisted', acceptance_check: 'rule_written' };
-    }
-
-    return { accepted: true, reason: 'rule_persisted', acceptance_check: 'rule_written' };
-}
-
 export function buildFixCommitSignalPayload(message: string, hash: string, files: string[]): Record<string, unknown> {
     const pattern = message.trim();
     return {
@@ -853,7 +836,7 @@ function mapSignalTypeToScope(signalType: Signal['type']): Rule['pattern']['scop
     }
 }
 
-function ruleExists(patternMatch: string, projectKey: string): boolean {
+function findRule(patternMatch: string, projectKey: string): Rule | null {
     for (const type of ['soft', 'hard'] as const) {
         const dir = join(HARNESS_DIR, `rules/${type}`);
         if (!existsSync(dir)) continue;
@@ -863,12 +846,77 @@ function ruleExists(patternMatch: string, projectKey: string): boolean {
                 const rule: Rule = JSON.parse(readFileSync(join(dir, file), 'utf-8'));
                 if (rule.pattern.match === patternMatch &&
                     (rule.project_key === projectKey || rule.project_key === 'global')) {
-                    return true;
+                    return rule;
                 }
             } catch { /* 무시 */ }
         }
     }
-    return false;
+    return null;
+}
+
+function ruleExists(patternMatch: string, projectKey: string): boolean {
+    return findRule(patternMatch, projectKey) !== null;
+}
+
+function validateRuleFields(rule: Rule): boolean {
+    return !!(
+        rule.id &&
+        rule.type &&
+        rule.pattern &&
+        rule.description
+    );
+}
+
+export function evaluateAckAcceptance(signal: Signal, _ackPath: string): AckAcceptanceResult {
+    const pattern = signal.payload.pattern || signal.payload.description;
+    if (!pattern) {
+        return {
+            checks_passed: [],
+            checks_failed: [{ check: 'rule_written', reason: 'missing_signal_pattern' }],
+            verdict: 'rejected',
+            reason: 'failed: rule_written (missing_signal_pattern)',
+        };
+    }
+
+    const normalizedPattern = signal.type === 'fix_commit' ? escapeRegexLiteral(pattern) : pattern;
+
+    // Check 1: rule_written
+    const rule = findRule(normalizedPattern, signal.project_key);
+    if (!rule) {
+        return {
+            checks_passed: [],
+            checks_failed: [{ check: 'rule_written', reason: 'rule_file_not_found' }],
+            verdict: 'rejected',
+            reason: 'failed: rule_written (rule_file_not_found)',
+        };
+    }
+
+    // Check 2: rule_valid
+    if (!validateRuleFields(rule)) {
+        return {
+            checks_passed: ['rule_written'],
+            checks_failed: [{ check: 'rule_valid', reason: 'rule_missing_required_fields' }],
+            verdict: 'rejected',
+            reason: 'failed: rule_valid (rule_missing_required_fields)',
+        };
+    }
+
+    // Check 3: not_prune_candidate
+    if (rule.prune_candidate && rule.prune_candidate.guard_enabled !== false) {
+        return {
+            checks_passed: ['rule_written', 'rule_valid'],
+            checks_failed: [{ check: 'not_prune_candidate', reason: 'rule_is_prune_candidate' }],
+            verdict: 'rejected',
+            reason: 'failed: not_prune_candidate (rule_is_prune_candidate)',
+        };
+    }
+
+    return {
+        checks_passed: ['rule_written', 'rule_valid', 'not_prune_candidate'],
+        checks_failed: [],
+        verdict: 'accepted',
+        reason: 'all_3_checks_passed',
+    };
 }
 
 function signalToRule(signal: Signal, worktree: string): void {
@@ -1347,9 +1395,9 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                         const ackPath = join(ackDir, file);
                         renameSync(filePath, ackPath);
 
-                        const acceptance = settings.ack_guard_enabled
+                        const acceptance: AckAcceptanceResult = settings.ack_guard_enabled
                             ? evaluateAckAcceptance(signal, ackPath)
-                            : { accepted: false, reason: 'guard_disabled', acceptance_check: 'rule_written' as const };
+                            : { checks_passed: [], checks_failed: [], verdict: 'rejected' as const, reason: 'guard_disabled' };
 
                         appendAckRecord(projectKey, {
                             signal_id: signal.id,
@@ -1358,12 +1406,14 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                             state: 'written',
                             signal_type: signal.type,
                             guard_enabled: settings.ack_guard_enabled,
-                            acceptance_check: acceptance.acceptance_check,
-                            accepted: acceptance.accepted,
+                            accepted: acceptance.verdict === 'accepted',
                             reason: acceptance.reason,
+                            acceptance_checks_passed: acceptance.checks_passed,
+                            acceptance_checks_failed: acceptance.checks_failed,
+                            acceptance_verdict: acceptance.verdict,
                         });
 
-                        if (settings.ack_guard_enabled && acceptance.accepted) {
+                        if (settings.ack_guard_enabled && acceptance.verdict === 'accepted') {
                             appendAckRecord(projectKey, {
                                 signal_id: signal.id,
                                 project_key: projectKey,
@@ -1371,9 +1421,11 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                                 state: 'accepted',
                                 signal_type: signal.type,
                                 guard_enabled: true,
-                                acceptance_check: acceptance.acceptance_check,
                                 accepted: true,
                                 reason: acceptance.reason,
+                                acceptance_checks_passed: acceptance.checks_passed,
+                                acceptance_checks_failed: acceptance.checks_failed,
+                                acceptance_verdict: acceptance.verdict,
                             });
                         }
                     } catch (err) {

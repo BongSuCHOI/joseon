@@ -120,7 +120,7 @@ Orchestrator (최상위, 기본 에이전트)
 ### Step 4 이후 고도화 (시기 미정)
 
 - 세부 rationale / guard 조건 / rollout 기준: [`docs/step4-post-enhancements.md`](docs/step4-post-enhancements.md)
-- Step 5a~5g 구현·검증 완료. 5a: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그. 5b: Extract shadow + compacting relevance shadow/default-off. 5c: rule lifecycle 후보 경로. 5d: auto-update-checker. 5e: mistake pattern candidate grouping (`computePatternIdentity`, `groupMistakeCandidates`, `candidate_threshold` 기본 3). 5f: metadata-based phase/signal canary evaluation (`canary_enabled` default false, `canary-mismatches.jsonl`, mismatch aggregation report, smoke 77/77 통과). 5g: metadata-based compacting canary evaluation (`compacting_canary_enabled` default false, `compacting-canary-mismatches.jsonl`, mismatch aggregation report, smoke 74/74 통과). 본 경로 롤아웃은 아직 아님.
+- Step 5a~5h 구현·검증 완료. 5a: phase/signal 그림자 로깅, diff 실수 요약 그림자 로깅, written/accepted ack 상태 로그. 5b: Extract shadow + compacting relevance shadow/default-off. 5c: rule lifecycle 후보 경로. 5d: auto-update-checker. 5e: mistake pattern candidate grouping (`computePatternIdentity`, `groupMistakeCandidates`, `candidate_threshold` 기본 3). 5f: metadata-based phase/signal canary evaluation (`canary_enabled` default false, `canary-mismatches.jsonl`, mismatch aggregation report, smoke 77/77 통과). 5g: metadata-based compacting canary evaluation (`compacting_canary_enabled` default false, `compacting-canary-mismatches.jsonl`, mismatch aggregation report, smoke 74/74 통과). 5h: ack acceptance plane — multi-check evaluator (rule_written + rule_valid + not_prune_candidate), passive-only, smoke 192/192 통과. 본 경로 롤아웃은 아직 아님.
 
 | 항목 | 상태 / 전략 | 요약 |
 |------|-------------|------|
@@ -129,12 +129,12 @@ Orchestrator (최상위, 기본 에이전트)
 | Compacting 의미 기반 규칙 필터링 | default-off shadow + compacting canary (5g) | reduced-safe 5b로 metadata-first shadow + opt-in 경로 추가. 5g로 compacting canary evaluation 구현. 기본 compacting은 계속 유지. |
 | LLM 기반 Phase 구조 (#A) + LLM 기반 signal 판정 (#B) | shadow | deterministic baseline 유지 + phase/signal 그림자 로깅. Step 5f: metadata-based canary evaluation (`canary_enabled` default false) + `canary-mismatches.jsonl` + aggregation report. |
 | fix: diff 기반 실수 패턴 학습 | guarded-shadow | fix_commit 경로 유지 + mistake_summary 그림자 로깅 + Step 5e로 candidate grouping 구현. `mistake-pattern-candidates.jsonl`에 threshold 기반 candidate 기록. 자동 rule 생성은 비활성. |
-| Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off. |
+| Ack 조건 강화 | guarded | written/accepted ack 로깅 + ack_guard_enabled default-off + Step 5h multi-check evaluator (rule_written, rule_valid, not_prune_candidate), passive-only. 후속 A/B/C: effectiveness_confirmed, no_recent_recurrence, not_false_positive (각각 데이터 축적 후). |
 | Cross-Project 자동 승격 | guarded-off | Step 5c로 `cross-project-promotion-candidates.jsonl` exact-match 후보 기록. 수동 `global` 우선 유지. |
 | Hooks — auto-update-checker | 완료 — default-off warn-only | npm 배포 후 `session.created`에서만 버전 확인, 전역 24h 쿨다운 상태 파일 사용. |
 <!--
 | fix: diff 기반 실수 패턴 학습 | LLM 기반 signal 판정(#B)과 함께. fix 커밋의 diff에서 "왜 고쳤는가"를 추출하여 의미 있는 규칙 패턴 생성. 현재는 source_file(파일 경로)을 패턴으로 사용하는데, 이는 논리적 오류(수정한 파일 = 수정 금지 파일). diff 분석은 단순 패턴 매칭으로 한계가 있으므로 LLM 필요 |
-| Ack 조건 강화 | harness-eval 도구 설계 시점. 현재 "파일 쓰기 성공 = ack" → "eval 통과 시 ack"로 강화 |
+| Ack 조건 강화 | Step 5h로 multi-check evaluator 구현 완료. 후속: effectiveness_confirmed (30일 데이터), no_recent_recurrence (accepted 취소 메커니즘), not_false_positive (canary mismatch 데이터) |
 | Cross-Project 자동 승격 | 2개 이상 프로젝트 운영 시. `global` 키워드 인프라는 이미 구축됨 (~80줄). 승격 기준 설계가 핵심 |
 
 -->

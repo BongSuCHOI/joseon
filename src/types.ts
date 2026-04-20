@@ -151,6 +151,18 @@ export interface MistakePatternCandidate {
     mistake_summary_samples: string[];
 }
 
+export interface AckAcceptanceCheckFailure {
+    check: string;
+    reason: string;
+}
+
+export interface AckAcceptanceResult {
+    checks_passed: string[];
+    checks_failed: AckAcceptanceCheckFailure[];
+    verdict: 'accepted' | 'rejected';
+    reason: string;
+}
+
 export interface AckRecord {
     signal_id: string;
     project_key: string;
@@ -158,9 +170,13 @@ export interface AckRecord {
     state: 'written' | 'accepted';
     signal_type: Signal['type'];
     guard_enabled: boolean;
-    acceptance_check: 'rule_written';
+    acceptance_check?: 'rule_written';  // deprecated: pre-5h records only
     accepted: boolean;
     reason: string;
+    // Step 5h: multi-check acceptance fields
+    acceptance_checks_passed?: string[];
+    acceptance_checks_failed?: AckAcceptanceCheckFailure[];
+    acceptance_verdict?: 'accepted' | 'rejected';
 }
 
 export interface MemoryFact {
