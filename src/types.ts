@@ -3,7 +3,7 @@
 
 export interface Signal {
     id: string;
-    type: 'fix_commit' | 'error_repeat' | 'user_feedback' | 'violation';
+    type: 'fix_commit' | 'error_repeat' | 'user_feedback' | 'violation' | 'tool_loop' | 'retry_storm' | 'excessive_read';
     project_key: string;
     session_id?: string;
     agent_id?: string;  // Step 4: 오케스트레이터/서브에이전트 식별용
@@ -173,6 +173,8 @@ export interface MemoryFact {
     content: string;
     source_session: string;
     created_at: string;
+    last_accessed_at?: number;
+    access_count?: number;
 }
 
 export interface UpperMemoryExtractShadowRecord {

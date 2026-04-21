@@ -38,6 +38,11 @@ export interface HarnessSettings {
     candidate_threshold?: number;
     canary_enabled?: boolean;
     compacting_canary_enabled?: boolean;
+    tool_loop_threshold?: number;
+    retry_storm_threshold?: number;
+    excessive_read_threshold?: number;
+    fact_ttl_days?: number;
+    fact_ttl_extend_threshold?: number;
 }
 
 export interface HarnessConfig {
@@ -63,6 +68,11 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     candidate_threshold: 3,
     canary_enabled: false,
     compacting_canary_enabled: false,
+    tool_loop_threshold: 5,
+    retry_storm_threshold: 3,
+    excessive_read_threshold: 4,
+    fact_ttl_days: 30,
+    fact_ttl_extend_threshold: 5,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

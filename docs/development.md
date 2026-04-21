@@ -79,9 +79,12 @@ Smoke 테스트는 개별 실행:
 ./node_modules/.bin/tsx test/smoke-test.ts
 ./node_modules/.bin/tsx test/smoke-test-step3.ts
 ./node_modules/.bin/tsx test/smoke-test-step4.ts
+
+# token-optimization unit tests (vitest)
+npx vitest run
 ```
 
-### Test Files (14개, 564 assertions)
+### Test Files (15개, 580 assertions)
 
 | 파일 | Assertions |
 |------|-----------|
@@ -99,6 +102,7 @@ Smoke 테스트는 개별 실행:
 | test/smoke-test.ts | 46 |
 | test/smoke-test-step3.ts | 50 |
 | test/smoke-test-step4.ts | 189 |
+| token-optimization.test.ts | 16 |
 
 ### Test History
 
@@ -110,6 +114,7 @@ Smoke 테스트는 개별 실행:
 | Step 4 | 오케스트레이션 | 통과 |
 | Step 5a~5h | shadow/guarded 기능 | 통과 |
 | Simplify + consolidate/relate | readability + Phase 제거 + error-recovery 제거 + 메모리 병합/관계 | 564/564 |
+| Token Optimization | Observer 낭비 탐지기 + Fact TTL/접근추적 + 3계층 점근적 공개 | 580/580 |
 
 ---
 

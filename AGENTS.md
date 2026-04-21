@@ -7,7 +7,7 @@
 # Project
 
 **harness-orchestration** — OpenCode 플러그인 기반 하네스 + 오케스트레이션 시스템.
-Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 + Step 5a~5h 전부 완료.
+Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 + Step 5a~5h + Token Optimization(Observer 낭비 탐지, Memory Recall 3계층, Fact TTL) 전부 완료.
 
 # Core Rules
 

@@ -52,6 +52,12 @@ export function isLowConfidenceProxy(record: ShadowDecisionRecord): string | nul
             const ctx = record.context as Record<string, unknown> | undefined;
             if (ctx?.repeat_count === 2) return 'error_pre_alert';
         }
+
+        // Waste detector signals — always considered low-confidence proxies
+        // since they use proxy metrics (not actual token counts)
+        if (record.deterministic.signal_type === 'tool_loop') return 'tool_loop';
+        if (record.deterministic.signal_type === 'retry_storm') return 'retry_storm';
+        if (record.deterministic.signal_type === 'excessive_read') return 'excessive_read';
     }
 
     return null;
@@ -84,6 +90,14 @@ export function computeSignalRelevance(record: ShadowDecisionRecord): string {
         const ctx = record.context as Record<string, unknown> | undefined;
         const repeatCount = (ctx?.repeat_count as number) ?? 0;
         if (repeatCount >= 2) return 'high';
+        return 'low';
+    }
+
+    if (signalType === 'tool_loop' || signalType === 'retry_storm' || signalType === 'excessive_read') {
+        const ctx = record.context as Record<string, unknown> | undefined;
+        const recurrenceCount = (ctx?.recurrence_count as number) ?? 0;
+        if (recurrenceCount >= 5) return 'high';
+        if (recurrenceCount >= 3) return 'medium';
         return 'low';
     }
 

@@ -169,6 +169,9 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
     const errorCounts = new Map<string, number>();
     const harnessSettings = getHarnessSettings(ctx.config);
     const depthTracker = new SubagentDepthTracker(harnessSettings.max_subagent_depth);
+    const toolCallCounts = new Map<string, number>();       // key: `${sessionID}::${tool}::${argsFingerprint}`
+    const retryCycles = new Map<string, number>();            // key: `${sessionID}::${tool}`
+    const fileReadCounts = new Map<string, number>();         // key: `${sessionID}::${filePath}`
 
     return {
         'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output?: { title?: string; output?: string }) => {
@@ -178,6 +181,75 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 title: output?.title,
                 output_preview: typeof output?.output === 'string' ? output.output.slice(0, MAX_OUTPUT_PREVIEW_LENGTH) : undefined,
             });
+
+            // --- tool_loop detection ---
+            const argsFingerprint = JSON.stringify(input.args).slice(0, 200);
+            const toolCallKey = `${input.sessionID}::${input.tool}::${argsFingerprint}`;
+            const toolCallCount = (toolCallCounts.get(toolCallKey) || 0) + 1;
+            toolCallCounts.set(toolCallKey, toolCallCount);
+            if (toolCallCount >= harnessSettings.tool_loop_threshold) {
+                emitSignal({
+                    type: 'tool_loop',
+                    project_key: projectKey,
+                    session_id: input.sessionID,
+                    payload: {
+                        description: `Tool '${input.tool}' called ${toolCallCount} times with identical args in session ${input.sessionID}`,
+                        tool_name: input.tool,
+                        args_fingerprint: argsFingerprint,
+                        recurrence_count: toolCallCount,
+                    },
+                });
+                toolCallCounts.delete(toolCallKey);
+            }
+
+            // --- retry_storm detection ---
+            const isToolError = typeof output?.output === 'string' && (output.output.includes('error') || output.output.includes('Error'));
+            const retryKey = `${input.sessionID}::${input.tool}`;
+            if (isToolError) {
+                const retryCount = (retryCycles.get(retryKey) || 0) + 1;
+                retryCycles.set(retryKey, retryCount);
+                if (retryCount >= harnessSettings.retry_storm_threshold) {
+                    emitSignal({
+                        type: 'retry_storm',
+                        project_key: projectKey,
+                        session_id: input.sessionID,
+                        payload: {
+                            description: `Tool '${input.tool}' retried ${retryCount} times with errors in session ${input.sessionID}`,
+                            tool_name: input.tool,
+                            recurrence_count: retryCount,
+                        },
+                    });
+                    retryCycles.delete(retryKey);
+                }
+            } else {
+                retryCycles.delete(retryKey);
+            }
+
+            // --- excessive_read detection ---
+            const readLikeTools = ['Read', 'Glob', 'Grep'];
+            if (readLikeTools.includes(input.tool)) {
+                const args = input.args as Record<string, unknown> | null | undefined;
+                const filePath = (typeof args?.filePath === 'string' && args.filePath)
+                    || (typeof args?.path === 'string' && args.path)
+                    || (typeof args?.pattern === 'string' && args.pattern)
+                    || JSON.stringify(input.args).slice(0, 100);
+                const readKey = `${input.sessionID}::${filePath}`;
+                const readCount = (fileReadCounts.get(readKey) || 0) + 1;
+                fileReadCounts.set(readKey, readCount);
+                if (readCount >= harnessSettings.excessive_read_threshold) {
+                    emitSignal({
+                        type: 'excessive_read',
+                        project_key: projectKey,
+                        session_id: input.sessionID,
+                        payload: {
+                            description: `File/resource '${filePath}' read ${readCount} times in session ${input.sessionID}`,
+                            file_path: filePath,
+                            recurrence_count: readCount,
+                        },
+                    });
+                    fileReadCounts.delete(readKey);
+                }
+            }
         },
 
         event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
@@ -185,6 +257,16 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 const sessionID = getProp<string>(event, 'sessionID') || 'unknown';
                 persistSessionStart(projectKey, sessionID);
                 acquireSessionLock(projectKey);
+                // Clear tracking maps for this session
+                for (const key of [...toolCallCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                    toolCallCounts.delete(key);
+                }
+                for (const key of [...retryCycles.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                    retryCycles.delete(key);
+                }
+                for (const key of [...fileReadCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                    fileReadCounts.delete(key);
+                }
             }
 
             if (event.type === 'session.updated') {
@@ -206,6 +288,16 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 const sessionID = getProp<string>(event, 'sessionID');
                 if (sessionID) {
                     depthTracker.cleanup(sessionID);
+                    // Clear tracking maps for this session
+                    for (const key of [...toolCallCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                        toolCallCounts.delete(key);
+                    }
+                    for (const key of [...retryCycles.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                        retryCycles.delete(key);
+                    }
+                    for (const key of [...fileReadCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                        fileReadCounts.delete(key);
+                    }
                 }
             }
 

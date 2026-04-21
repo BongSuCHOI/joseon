@@ -19,6 +19,7 @@
 | 3 | 브릿지 | `.opencode/rules/` + Memory Index/Search + history 로테이션 | ✅ 완료 |
 | 4 | 오케스트레이션 | + orchestrator (서브에이전트 라우팅, QA 추적 연동) | ✅ 완료 |
 | 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 활성화 — .opencode/harness.jsonc에서 토글 ON) |
+| Token Opt. | 토큰 최적화 | Observer 낭비 탐지기(3개) + Memory Recall 3계층 공개 + Fact TTL/접근 추적 | ✅ 완료 |
 
 ---
 
@@ -51,12 +52,18 @@ Observer는 L1(관측)과 L2(신호 변환)를 담당하는 하네스의 첫 번
 - `error_repeat`: 동일 에러 메시지가 3회 이상 반복 시 Signal 생성
 - `user_feedback`: 11개 한국어 불만 키워드 매칭 시 Signal 생성
 - `fix_commit`: `git log --since=<session_start>`로 fix: 커밋 감지 후 Signal 생성
+- `tool_loop`: 동일 툴+args 반복 호출이 `tool_loop_threshold`(기본 5) 도달 시 Signal 생성
+- `retry_storm`: 에러→재시도 사이클이 `retry_storm_threshold`(기본 3) 도달 시 Signal 생성
+- `excessive_read`: 동일 파일 반복 읽기가 `excessive_read_threshold`(기본 4) 도달 시 Signal 생성
 
 **Signal 생성 흐름:**
 ```
 이벤트 관측 → 패턴 매칭 (에러 반복/불만 키워드/fix 커밋)
     → pending/{id}.json에 Signal 저장
 ```
+
+**낭비 탐지기 (Token Optimization):**
+Observer의 `tool.execute.after` 훅에서 프록시 메트릭(툴 호출 횟수, 반복 패턴)을 기반으로 토큰 낭비 패턴을 감지한다. OpenCode API에서 실제 토큰 수를 알 수 없으므로 프록시 메트릭을 사용한다. 3개 탐지기 모두 인메모리 Map으로 세션별 추적하며, `session.created`/`session.deleted`에서 자동 초기화된다.
 
 **세션 락:** `session.created`에서 PID 파일로 동일 프로젝트의 동시 세션을 차단한다.
 
@@ -119,6 +126,22 @@ HARD 승격 (rules/hard/{id}.json)
 - `experimental.session.compacting` 훅에서 동작
 - scaffold + HARD 규칙 + SOFT 규칙을 세션 컨텍스트에 주입
 - `scope:prompt` 규칙은 세션 시작부터 `.opencode/rules/`에 노출되어, compacting이 발동하지 않는 짧은 세션에서도 에이전트가 규칙을 인지
+
+#### Memory Fact 접근 추적 및 TTL
+
+- **접근 추적:** compacting 주입 시 적용된 fact의 `access_count`를 증가시키고 `last_accessed_at`을 갱신
+- **TTL 기반 정리:** `access_count=0`인 fact가 `fact_ttl_days`(기본 30일) 경과 시 archive로 이동
+- **TTL 연장:** `access_count ≥ fact_ttl_extend_threshold`(기본 5)인 fact는 TTL이 2배로 연장
+- **하위 호환:** 기존 fact 파일에 `last_accessed_at`/`access_count` 필드가 없어도 기본값으로 동작
+
+#### 3계층 점진적 공개 (Memory Recall)
+
+compacting 시 모든 fact를 전체 내용으로 주입하는 대신, 점수에 따라 3계층으로 나누어 주입한다.
+
+- **Layer 3 (전체):** 점수 상위 30% fact — id + 전체 내용 + keywords (~200 토큰/fact)
+- **Layer 2 (요약):** 점수 중간 40% fact — id + keywords + 첫 문장 (~50 토큰/fact)
+- **Layer 1 (인덱스):** 점수 하위 30% fact — id + keywords만 (~15 토큰/fact)
+- **조건:** `semantic_compacting_enabled=true` + fact > 2개일 때만 적용. 비활성화 시 기존 방식(L3 전체) 유지
 
 ---
 
@@ -206,9 +229,9 @@ bash tool output → test failure 패턴 감지 (orchestrator hook)
 | **Extract** | ✅ 활성 — 세션에서 결정/선호/제약 키워드 추출 | 세션에서 결정/선호/제약 추출 후보만 기록 |
 | **Consolidate** | ✅ 활성 | Jaccard 유사도 + union-find로 중복 fact 병합 (consolidateFacts) |
 | **Relate** | ✅ 활성 | 키워드 기반 fact 관계 연결 (relateFacts, relations.jsonl) |
-| **Recall** | 미구현 | 다양한 회수 경로 |
+| **Recall** | ✅ 활성 — 3계층 점진적 공개 (semantic compacting 시 점수 기반 L1/L2/L3 분할) | compacting 시 점수에 따라 fact를 3계층으로 분할 주입 |
 
-Recall만 미구현. Consolidate/Relate는 활성화 완료.
+Recall은 3계층 점진적 공개로 구현 완료. 상위 4단계 전부 활성화.
 
 ---
 
@@ -263,6 +286,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 - **병합:** 글로벌(`~/.config/opencode/harness.jsonc`) + 프로젝트(`.opencode/harness.jsonc`) 병합
 - **에이전트별 오버라이드:** `model`, `temperature`, `hidden`, `variant`, `skills`, `mcps`, `options`, `prompt`, `append_prompt`, `deny_tools`
 - **FallbackChain:** 모델 배열로 자동 폴백 지원
+- **Token 최적화 설정:** `tool_loop_threshold`(5), `retry_storm_threshold`(3), `excessive_read_threshold`(4), `fact_ttl_days`(30), `fact_ttl_extend_threshold`(5)
 
 ---
 

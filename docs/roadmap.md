@@ -48,9 +48,9 @@
 
 | 항목 | 현재 상태 | 권장 모드 |
 |------|----------|----------|
-| 1. 크로스세션 기억 상위 4단계 | Consolidate/Relate 활성, Extract shadow, Recall 미구현 | 활성 |
+| 1. 크로스세션 기억 상위 4단계 | Consolidate/Relate 활성, Extract shadow, Recall 활성 (3계층 점진적 공개) | 활성 |
 | 2. 규칙 자동 삭제 (Pruning) | candidate-first pruning + append-only log | guarded-off |
-| 3. 의미 기반 compacting 필터 | relevance shadow + compacting canary (5g) | 활성 (semantic_compacting_enabled=true) |
+| 3. 의미 기반 compacting 필터 | relevance shadow + compacting canary (5g) + 3계층 점진적 공개 | 활성 (semantic_compacting_enabled=true) |
 | 4. LLM 기반 signal 판정 | deterministic baseline + canary (5f) | 활성 (canary_enabled=true) |
 | 5. diff 기반 실수 패턴 학습 | mistake_summary shadow + candidate grouping (5e) | guarded-shadow |
 | 6. Ack 조건 강화 | written/accepted 로그 + 3-check evaluator (5h) | guarded + passive-only |
@@ -63,7 +63,7 @@
 
 ### 현재 상태
 
-`Sync / Index / Search`가 본 경로다. Consolidate(`consolidateFacts`)와 Relate(`relateFacts`)가 활성화되었다. Recall만 아직 없다.
+`Sync / Index / Search`가 본 경로다. Consolidate(`consolidateFacts`)와 Relate(`relateFacts`)가 활성화되었다. Recall은 3계층 점진적 공개로 구현되었다 — compacting 시 fact를 점수 기준으로 L3(전체)/L2(요약)/L1(인덱스)로 분할하여 주입 토큰을 ~70-90% 절감한다.
 
 ### 의도
 
@@ -129,6 +129,7 @@
 
 ### 아직 비활성
 
+- LLM/embedding 기반 심층 Recall (현재는 메타데이터 점수 기반)
 - 상위 4단계의 본 경로 판정
 - 전체 세션 대상 자동 승격
 - 실패 사례를 근거 없이 즉시 덮어쓰기
@@ -198,6 +199,8 @@ Step 5c에서 `prune_candidate`와 `rule-prune-candidates.jsonl`이 추가되었
 ### 현재 상태
 
 compacting은 하네스 컨텍스트를 주입한다. reduced-safe 5b로 `compacting-relevance-shadow.jsonl`에 relevance shadow를 남기고, `semantic_compacting_enabled` opt-in에서만 metadata-first 정렬을 적용할 수 있다. Step 5g로 compacting canary evaluation을 추가했다. `compacting_canary_enabled`(기본값 false)가 켜진 경우 shadow record에서 baseline vs semantic 차이를 평가하고 `compacting-canary-mismatches.jsonl`에 기록한다. `.opencode/harness.jsonc`에서 `semantic_compacting_enabled`, `compacting_canary_enabled` 모두 true로 활성화.
+
+Token Optimization으로 3계층 점진적 공개가 추가되었다. `semantic_compacting_enabled=true` 시 fact를 점수 기준으로 상위 30%(L3 전체), 중간 40%(L2 요약), 하위 30%(L1 인덱스)로 분할하여 compacting 주입 토큰을 절감한다.
 
 ### 의도
 

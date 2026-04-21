@@ -539,6 +539,14 @@ function parseIsoDate(value?: string): number {
     return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+export function normalizeFactAccess(fact: MemoryFact): MemoryFact {
+    return {
+        ...fact,
+        last_accessed_at: fact.last_accessed_at ?? parseIsoDate(fact.created_at),
+        access_count: fact.access_count ?? 0,
+    };
+}
+
 function getRecentActivityBoost(value?: string): number {
     const parsed = parseIsoDate(value);
     if (!parsed) return 0;
@@ -822,12 +830,15 @@ function syncRulesMarkdown(worktree: string): void {
 
 // ─── 3.2 signalToRule — pending signal → SOFT 규칙 변환 ──────────────
 
-function mapSignalTypeToScope(signalType: Signal['type']): Rule['pattern']['scope'] {
+export function mapSignalTypeToScope(signalType: Signal['type']): Rule['pattern']['scope'] {
     switch (signalType) {
         case 'error_repeat': return 'tool';
         case 'user_feedback': return 'prompt';
         case 'fix_commit': return 'tool';
         case 'violation': return 'tool';
+        case 'tool_loop': return 'tool';
+        case 'retry_storm': return 'tool';
+        case 'excessive_read': return 'tool';
         default: return 'tool';
     }
 }
@@ -1258,6 +1269,8 @@ function indexSessionFacts(projectKey: string): void {
                 content: fact.content,
                 source_session: sessionFile,
                 created_at: new Date().toISOString(),
+                last_accessed_at: Date.now(),
+                access_count: 0,
             };
             writeFileSync(join(factsDir, `${id}.json`), JSON.stringify(factData, null, 2));
             try {
@@ -1520,6 +1533,68 @@ function relateFacts(projectKey: string): void {
 // ─── 3.7 compacting — 컨텍스트 주입 ────────────────────
 // Phase 3: Memory Search 결과 주입 추가
 
+export function trackFactAccess(facts: MemoryFact[]): void {
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    const now = Date.now();
+    for (const fact of facts) {
+        const normalized = normalizeFactAccess(fact);
+        normalized.access_count = (normalized.access_count ?? 0) + 1;
+        normalized.last_accessed_at = now;
+        const factPath = join(factsDir, `${fact.id}.json`);
+        if (existsSync(factPath)) {
+            writeFileSync(factPath, JSON.stringify(normalized, null, 2));
+        }
+    }
+}
+
+export function markFactPruneCandidates(projectKey: string, ttlDays: number, extendThreshold: number): void {
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    if (!existsSync(factsDir)) return;
+
+    const now = Date.now();
+    const facts = loadJsonFiles<MemoryFact>(factsDir);
+
+    for (const fact of facts) {
+        if (fact.project_key !== projectKey) continue;
+
+        const normalized = normalizeFactAccess(fact);
+        const accessCount = normalized.access_count ?? 0;
+        const effectiveTtlMs = accessCount >= extendThreshold
+            ? ttlDays * 2 * 24 * 60 * 60 * 1000
+            : ttlDays * 24 * 60 * 60 * 1000;
+
+        const createdMs = parseIsoDate(fact.created_at);
+        if (accessCount === 0 && (now - createdMs) >= effectiveTtlMs) {
+            // Mark for prune by moving to archive (same pattern as rule prune)
+            const srcPath = join(factsDir, `${fact.id}.json`);
+            const archiveDir = join(HARNESS_DIR, 'memory/archive');
+            mkdirSync(archiveDir, { recursive: true });
+            const dstPath = join(archiveDir, `${fact.id}.json`);
+            if (existsSync(srcPath)) {
+                renameSync(srcPath, dstPath);
+                logger.info('improver', 'fact pruned by TTL', {
+                    fact_id: fact.id,
+                    access_count: normalized.access_count,
+                    age_days: Math.floor((now - createdMs) / (24 * 60 * 60 * 1000)),
+                });
+            }
+        }
+    }
+}
+
+export function formatFactLayer(fact: MemoryFact, layer: 1 | 2 | 3): string {
+    switch (layer) {
+        case 1:
+            return `- [${fact.id.slice(0, 8)}] keywords: ${fact.keywords.join(', ')}`;
+        case 2: {
+            const firstSentence = fact.content.split(/[.!?]\s/)[0] || fact.content;
+            return `- [${fact.id.slice(0, 8)}] ${fact.keywords.join(', ')} — ${firstSentence}`;
+        }
+        case 3:
+            return `- [${fact.source_session}] ${fact.content} (keywords: ${fact.keywords.join(', ')})`;
+    }
+}
+
 function buildCompactionContext(projectKey: string, worktree: string, maxResults: number, semanticCompactingEnabled: boolean, config?: HarnessConfig): string[] {
     const parts: string[] = [];
 
@@ -1563,16 +1638,43 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
         });
     }
 
+    // Track fact access for TTL management
+    if (plan.applied_facts.length > 0) {
+        try {
+            trackFactAccess(plan.applied_facts);
+        } catch (err) {
+            logger.warn('improver', 'fact access tracking failed', { error: err });
+        }
+    }
+
     if (plan.applied_soft_rules.length > 0) {
         const descriptions = plan.applied_soft_rules.map((r) => `- [SOFT] ${r.description} (scope: ${r.pattern.scope})`).join('\n');
         parts.push(`[HARNESS SOFT RULES — recommended]\n${descriptions}`);
     }
 
     if (plan.applied_facts.length > 0) {
-        const factLines = plan.applied_facts.map(
-            (f) => `- [${f.source_session}] ${f.content} (keywords: ${f.keywords.join(', ')})`,
-        );
-        parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
+        if (semanticCompactingEnabled && plan.applied_facts.length > 2) {
+            // 3-layer progressive disclosure
+            const ranked = plan.semantic_fact_candidates
+                .filter(c => plan.applied_facts.some(f => f.id === c.fact.id));
+
+            const total = ranked.length;
+            const l3End = Math.max(1, Math.ceil(total * 0.3));
+            const l2End = Math.min(total, l3End + Math.ceil(total * 0.4));
+
+            const factLines: string[] = [];
+            for (let i = 0; i < total; i++) {
+                const layer = i < l3End ? 3 : i < l2End ? 2 : 1;
+                factLines.push(formatFactLayer(ranked[i].fact, layer));
+            }
+            parts.push(`[HARNESS MEMORY — past decisions (layered)]\n${factLines.join('\n')}`);
+        } else {
+            // Original format — all facts at full detail (L3)
+            const factLines = plan.applied_facts.map(
+                (f) => formatFactLayer(f, 3),
+            );
+            parts.push(`[HARNESS MEMORY — past decisions]\n${factLines.join('\n')}`);
+        }
     }
 
     return buildBoundedCompactionContext(parts, DIFF_MAX_CHARS);
@@ -1685,6 +1787,13 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
                 relateFacts(projectKey);
             } catch (err) {
                 logger.error('improver', 'fact relation discovery failed', { error: err });
+            }
+
+            // Token optimization: TTL-based fact pruning
+            try {
+                markFactPruneCandidates(projectKey, settings.fact_ttl_days, settings.fact_ttl_extend_threshold);
+            } catch (err) {
+                logger.error('improver', 'fact TTL pruning failed', { error: err });
             }
 
             // 프로젝트 상태 갱신
