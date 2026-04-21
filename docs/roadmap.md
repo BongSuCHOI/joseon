@@ -65,7 +65,9 @@
 
 `Sync / Index / Search`가 본 경로다. Consolidate(`consolidateFacts`)와 Relate(`relateFacts`)가 활성화되었다. Recall은 3계층 점진적 공개로 구현되었다 — compacting 시 fact를 점수 기준으로 L3(전체)/L2(요약)/L1(인덱스)로 분할하여 주입 토큰을 ~70-90% 절감한다.
 
-**Phase 1a (완료):** 파일 기반 의미론이 구현되었다. `origin_type`/`confidence`/`status` 메타데이터 프록시 분류, `hot-context.json` 자동 생성 및 compacting scaffold 앞 주입, `consolidateFacts()` 충돌 시 `must_verify` 부여, `is_experimental` + scope 불일치 승격 차단, `boundary_hint_enabled` 시 L1/L2 관련 기억 힌트, `memory-metrics.jsonl` 성능 메트릭 수집. 4개 토글(`hot_context_enabled`, `rich_fact_metadata_enabled`, `confidence_threshold_active`, `boundary_hint_enabled`)이 `.opencode/harness.jsonc`에 추가되었고 모두 default-off.
+**Phase 1a (완료):** 파일 기반 의미론이 구현되었다. `origin_type`/`confidence`/`status` 메타데이터 프록시 분류, `hot-context.json` 자동 생성 및 compacting scaffold 앞 주입, `consolidateFacts()` 충돌 시 `must_verify` 부여, `is_experimental` + scope 불일치 승격 차단, `boundary_hint_enabled` 시 L1/L2 관련 기억 힌트, `memory-metrics.jsonl` 성능 메트릭 수집이 들어갔다. 5개 토글(`hot_context_enabled`, `rich_fact_metadata_enabled`, `confidence_threshold_active`, `boundary_hint_enabled`, `gate_a_monitoring_enabled`)이 `.opencode/harness.jsonc`에 추가되었고 모두 default-off.
+
+**Gate A 자동 모니터링 (완료):** `gate_a_monitoring_enabled=true`면 최근 5개 `memory-metrics.jsonl` 이동 평균으로 Gate A를 자동 평가한다. 결과는 `gate-a-status.json`에 저장되고, 처음 trigger될 때만 `gate-a-alerts.jsonl`에 1회성 알림이 append된다. compacting 시에는 `[HARNESS MEMORY GATE A]` advisory가 함께 주입된다.
 
 **Phase 1b/2/3 (연기):** SQLite 도입, FTS5/벡터 검색, LLM 기반 fact 추출은 Gate A 메트릭(`memory-metrics.jsonl`) 기반으로 필요성이 확인되면 착수.
 

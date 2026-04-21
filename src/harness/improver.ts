@@ -16,6 +16,9 @@ import type {
     MemoryFact,
     FactOriginType,
     FactStatus,
+    GateAAlertRecord,
+    GateAConditionRecord,
+    GateAStatusRecord,
     HotContext,
     HotContextEntry,
     MemoryMetricRecord,
@@ -41,6 +44,14 @@ const FACT_KEYWORD_MAX_LENGTH = 200;
 const HOT_CONTEXT_MAX_CHARS = 2000;  // ~500 tokens estimate
 const METRICS_MAX_BYTES = 1048576;   // 1MB
 const METRICS_ROTATE_DAYS = 30;
+const GATE_A_WINDOW = 5;
+const GATE_A_THRESHOLDS: Record<GateAConditionRecord['key'], number> = {
+    facts_scanned_per_compaction: 80,
+    relations_scanned_per_lookup: 30,
+    hot_context_build_ms: 500,
+    compacting_build_ms: 2000,
+    total_fact_count: 100,
+};
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -611,6 +622,14 @@ function getMemoryMetricsPath(projectKey: string): string {
     return join(HARNESS_DIR, 'projects', projectKey, 'memory', 'memory-metrics.jsonl');
 }
 
+function getGateAStatusPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'memory', 'gate-a-status.json');
+}
+
+function getGateAAlertsPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'memory', 'gate-a-alerts.jsonl');
+}
+
 export function generateHotContext(projectKey: string, facts: MemoryFact[]): HotContext {
     // Filter to current project only + active facts (status: 'active' or undefined)
     const activeFacts = facts.filter(f =>
@@ -828,6 +847,141 @@ export function appendMemoryMetrics(projectKey: string, metrics: MemoryMetricRec
     }
 
     appendRecord(metricsPath, metrics);
+}
+
+function readMemoryMetrics(projectKey: string, limit = GATE_A_WINDOW): MemoryMetricRecord[] {
+    const metrics = loadJsonlRecords<MemoryMetricRecord>(getMemoryMetricsPath(projectKey));
+    return metrics.slice(-limit);
+}
+
+function readGateAStatus(projectKey: string): GateAStatusRecord | null {
+    const statusPath = getGateAStatusPath(projectKey);
+    if (!existsSync(statusPath)) return null;
+    try {
+        return JSON.parse(readFileSync(statusPath, 'utf-8')) as GateAStatusRecord;
+    } catch {
+        return null;
+    }
+}
+
+function writeGateAStatus(projectKey: string, status: GateAStatusRecord): void {
+    const dir = join(HARNESS_DIR, 'projects', projectKey, 'memory');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(getGateAStatusPath(projectKey), JSON.stringify(status, null, 2));
+}
+
+function appendGateAAlert(projectKey: string, status: GateAStatusRecord): void {
+    if (status.status !== 'triggered' || !status.recommended_action) return;
+    const alert: GateAAlertRecord = {
+        id: generateId(),
+        project_key: projectKey,
+        timestamp: new Date().toISOString(),
+        status: 'triggered',
+        reasons: status.reasons,
+        recommended_action: status.recommended_action,
+        sample_count: status.sample_count,
+    };
+    appendRecord(getGateAAlertsPath(projectKey), alert);
+}
+
+function averageMetric(records: MemoryMetricRecord[], key: GateAConditionRecord['key']): number {
+    if (records.length === 0) return 0;
+    const total = records.reduce((sum, record) => sum + (record[key] ?? 0), 0);
+    return total / records.length;
+}
+
+export function evaluateGateAStatus(projectKey: string, records: MemoryMetricRecord[]): GateAStatusRecord | null {
+    if (records.length === 0) return null;
+
+    const conditions = (Object.entries(GATE_A_THRESHOLDS) as Array<[GateAConditionRecord['key'], number]>).map(([key, threshold]) => {
+        const averageValue = averageMetric(records, key);
+        return {
+            key,
+            average_value: Number(averageValue.toFixed(2)),
+            threshold,
+            met: averageValue > threshold,
+            near_threshold: averageValue >= threshold * 0.8,
+        } satisfies GateAConditionRecord;
+    });
+
+    const metConditions = conditions.filter((condition) => condition.met).map((condition) => condition.key);
+    const nearThresholdConditions = conditions
+        .filter((condition) => !condition.met && condition.near_threshold)
+        .map((condition) => condition.key);
+
+    let status: GateAStatusRecord['status'] = 'healthy';
+    if (metConditions.length >= 2) {
+        status = 'triggered';
+    } else if (metConditions.length === 1) {
+        status = 'candidate';
+    } else if (nearThresholdConditions.length > 0) {
+        status = 'watch';
+    }
+
+    const reasons = conditions
+        .filter((condition) => condition.met || condition.near_threshold)
+        .map((condition) => `${condition.key} avg ${condition.average_value} / threshold ${condition.threshold}${condition.met ? ' (met)' : ' (watch)'}`);
+
+    return {
+        project_key: projectKey,
+        evaluated_at: new Date().toISOString(),
+        sample_count: records.length,
+        status,
+        conditions,
+        met_conditions: metConditions,
+        near_threshold_conditions: nearThresholdConditions,
+        reasons,
+        recommended_action: status === 'triggered'
+            ? 'Phase 1b (minimal SQLite) 검토 권장'
+            : undefined,
+    };
+}
+
+export function evaluateAndPersistGateA(projectKey: string, enabled: boolean): GateAStatusRecord | null {
+    if (!enabled) return null;
+
+    const metrics = readMemoryMetrics(projectKey);
+    const nextStatus = evaluateGateAStatus(projectKey, metrics);
+    if (!nextStatus) return null;
+
+    const previous = readGateAStatus(projectKey);
+    const becameTriggered = nextStatus.status === 'triggered' && previous?.status !== 'triggered';
+    const firstTriggeredAt = becameTriggered
+        ? nextStatus.evaluated_at
+        : previous?.first_triggered_at;
+    const lastAlertedAt = becameTriggered
+        ? nextStatus.evaluated_at
+        : previous?.last_alerted_at;
+
+    const statusToPersist: GateAStatusRecord = {
+        ...nextStatus,
+        first_triggered_at: firstTriggeredAt,
+        last_alerted_at: lastAlertedAt,
+    };
+
+    writeGateAStatus(projectKey, statusToPersist);
+
+    if (becameTriggered) {
+        appendGateAAlert(projectKey, statusToPersist);
+        logger.warn('improver', 'Gate A triggered', {
+            project_key: projectKey,
+            reasons: statusToPersist.reasons,
+        });
+    }
+
+    return statusToPersist;
+}
+
+function formatGateAAdvisory(status: GateAStatusRecord): string {
+    const reasons = status.reasons.length > 0
+        ? status.reasons.map((reason) => `- ${reason}`).join('\n')
+        : '- memory metrics threshold met';
+
+    return [
+        '[HARNESS MEMORY GATE A]',
+        'Phase 1b 후보 상태입니다. 최소 SQLite 도입 검토를 권장합니다.',
+        reasons,
+    ].join('\n');
 }
 
 export function collectMemoryMetrics(
@@ -2036,6 +2190,13 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     const parts: string[] = [];
     const settings = getHarnessSettings(config);
 
+    if (settings.gate_a_monitoring_enabled) {
+        const gateAStatus = readGateAStatus(projectKey);
+        if (gateAStatus?.status === 'triggered') {
+            parts.push(formatGateAAdvisory(gateAStatus));
+        }
+    }
+
     // Phase 1a-3: Hot context injection (before scaffold)
     if (settings.hot_context_enabled) {
         const hotCtx = readHotContext(projectKey);
@@ -2295,6 +2456,7 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
             try {
                 const metrics = collectMemoryMetrics(projectKey, sessionStartTime, hotContextBuildMs, 0);
                 appendMemoryMetrics(projectKey, metrics);
+                evaluateAndPersistGateA(projectKey, settings.gate_a_monitoring_enabled);
             } catch (err) {
                 logger.warn('improver', 'memory metrics collection failed', { error: err });
             }
@@ -2315,6 +2477,10 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
             try {
                 const metrics = collectMemoryMetrics(projectKey, compactingStart, 0, compactingMs);
                 appendMemoryMetrics(projectKey, metrics);
+                const gateAStatus = evaluateAndPersistGateA(projectKey, settings.gate_a_monitoring_enabled);
+                if (gateAStatus?.status === 'triggered' && !output.context.some((entry) => entry.includes('[HARNESS MEMORY GATE A]'))) {
+                    output.context.unshift(formatGateAAdvisory(gateAStatus));
+                }
             } catch { /* non-fatal */ }
         },
     };

@@ -8,7 +8,7 @@
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import type { MemoryFact, HotContext, MemoryMetricRecord, Rule } from '../types.js';
+import type { GateAAlertRecord, GateAStatusRecord, MemoryFact, HotContext, MemoryMetricRecord, Rule } from '../types.js';
 
 const TEMP_HARNESS_ROOT = join(tmpdir(), `phase1a-harness-${Date.now()}`);
 process.env.HARNESS_DIR_ROOT = TEMP_HARNESS_ROOT;
@@ -33,6 +33,8 @@ const {
     buildBoundaryHints,
     appendMemoryMetrics,
     collectMemoryMetrics,
+    evaluateGateAStatus,
+    evaluateAndPersistGateA,
     formatFactLayer,
     markFactPruneCandidates,
 } = improverModule;
@@ -71,6 +73,8 @@ const factsDir = join(HARNESS_DIR, 'memory', 'facts');
 let projectKey = 'unknown';
 let projectHarnessDir = '';
 let metricsPath = '';
+let gateAStatusPath = '';
+let gateAAlertsPath = '';
 
 // Track files we create so we can clean up
 const createdFactFiles: string[] = [];
@@ -107,6 +111,8 @@ async function main(): Promise<void> {
     projectKey = getProjectKey(testWorktree);
     projectHarnessDir = join(HARNESS_DIR, 'projects', projectKey);
     metricsPath = join(projectHarnessDir, 'memory', 'memory-metrics.jsonl');
+    gateAStatusPath = join(projectHarnessDir, 'memory', 'gate-a-status.json');
+    gateAAlertsPath = join(projectHarnessDir, 'memory', 'gate-a-alerts.jsonl');
     mkdirSync(projectHarnessDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
     mkdirSync(factsDir, { recursive: true });
@@ -397,6 +403,57 @@ async function main(): Promise<void> {
     assert(typeof collected.json_fact_load_ms === 'number', 'collectMemoryMetrics: json_fact_load_ms is number');
     assert((collected.json_fact_load_ms ?? 0) >= 0, 'collectMemoryMetrics: json_fact_load_ms >= 0');
 
+    // ─── Gate A: automatic monitoring + alerting ────
+    console.log('--- Gate A: monitoring + alerting ---');
+
+    // Seed 5 records that exceed 2 thresholds (total_fact_count + hot_context_build_ms)
+    for (let i = 0; i < 5; i++) {
+        appendMemoryMetrics(projectKey, {
+            ts: new Date(Date.now() + i * 1000).toISOString(),
+            phase: '1a',
+            active_fact_count: 90,
+            total_fact_count: 120,
+            relation_count: 10,
+            revision_count: 0,
+            hot_context_build_ms: 700,
+            compacting_build_ms: 100,
+            contradiction_count: 1,
+            facts_scanned_per_compaction: 60,
+            relations_scanned_per_lookup: 10,
+            json_fact_load_ms: 5,
+        });
+    }
+
+    const gateMetrics = readFileSync(metricsPath, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .slice(-5)
+        .map((line) => JSON.parse(line) as MemoryMetricRecord);
+    const gateStatus = evaluateGateAStatus(projectKey, gateMetrics);
+    assert(gateStatus !== null, 'evaluateGateAStatus: returns status for metrics');
+    assert(gateStatus!.status === 'triggered', 'evaluateGateAStatus: triggered when 2+ conditions met');
+    assert(gateStatus!.met_conditions.includes('total_fact_count'), 'evaluateGateAStatus: total_fact_count threshold met');
+    assert(gateStatus!.met_conditions.includes('hot_context_build_ms'), 'evaluateGateAStatus: hot_context_build_ms threshold met');
+
+    const persistedStatus = evaluateAndPersistGateA(projectKey, true);
+    assert(persistedStatus?.status === 'triggered', 'evaluateAndPersistGateA: persists triggered status');
+    assert(existsSync(gateAStatusPath), 'evaluateAndPersistGateA: gate-a-status.json created');
+    assert(existsSync(gateAAlertsPath), 'evaluateAndPersistGateA: gate-a-alerts.jsonl created on first trigger');
+
+    const statusOnDisk = JSON.parse(readFileSync(gateAStatusPath, 'utf-8')) as GateAStatusRecord;
+    assert(statusOnDisk.status === 'triggered', 'gate-a-status.json: status = triggered');
+    assert((statusOnDisk.recommended_action ?? '').includes('Phase 1b'), 'gate-a-status.json: recommended action recorded');
+
+    const initialAlerts = readFileSync(gateAAlertsPath, 'utf-8').split('\n').filter(Boolean);
+    assert(initialAlerts.length === 1, 'gate-a-alerts.jsonl: one alert appended on first trigger');
+    const parsedAlert = JSON.parse(initialAlerts[0]) as GateAAlertRecord;
+    assert(parsedAlert.status === 'triggered', 'gate-a-alerts.jsonl: alert status = triggered');
+
+    // Re-evaluate while still triggered → no duplicate alert
+    evaluateAndPersistGateA(projectKey, true);
+    const dedupedAlerts = readFileSync(gateAAlertsPath, 'utf-8').split('\n').filter(Boolean);
+    assert(dedupedAlerts.length === 1, 'evaluateAndPersistGateA: no duplicate alert while status remains triggered');
+
     // ─── Hook-level: event (session.idle) ────
     console.log('--- Hook: session.idle (hot context + metrics) ---');
 
@@ -514,7 +571,7 @@ async function main(): Promise<void> {
 
     const compactor = await HarnessImprover(
         { worktree: testWorktree },
-        { harness: { hot_context_enabled: true, rich_fact_metadata_enabled: true, semantic_compacting_enabled: true, boundary_hint_enabled: true } },
+        { harness: { hot_context_enabled: true, rich_fact_metadata_enabled: true, semantic_compacting_enabled: true, boundary_hint_enabled: true, gate_a_monitoring_enabled: true } },
     );
     const compactingHook = compactor['experimental.session.compacting'] as (_input: unknown, output: { context: string[] }) => Promise<void>;
 
@@ -523,6 +580,7 @@ async function main(): Promise<void> {
 
     const joinedContext = compactionOutput.context.join('\n');
     assert(compactionOutput.context.length > 0, 'compacting hook: context populated');
+    assert(joinedContext.includes('[HARNESS MEMORY GATE A]'), 'compacting hook: Gate A advisory injected when triggered');
     assert(joinedContext.includes('[HARNESS HOT CONTEXT'), 'compacting hook: hot context injected before scaffold');
     assert(joinedContext.includes('[HARNESS SCAFFOLD]'), 'compacting hook: scaffold injected');
     // Verify ordering: hot context comes before scaffold

@@ -912,7 +912,7 @@ try {
 ### 10.3 Gate A 평가
 
 - **시작:** Phase 1a 토글 전체 활성화 후 메트릭 축적 시작
-- **주기:** 주 1회 `memory-metrics.jsonl` 리뷰
+- **주기:** 기본은 하네스의 Gate A 자동 평가(`gate_a_monitoring_enabled`) + 필요 시 주간 수동 리뷰 병행
 - **판단:** Gate A 조건 2개 이상 충족 시 Phase 1b 착수 논의 (마스터 플랜 섹션 7 참조)
 
 ---

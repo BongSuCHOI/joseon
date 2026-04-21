@@ -121,6 +121,7 @@
         "rich_fact_metadata_enabled": true, // origin_type/confidence/status 메타데이터 활성화
         "confidence_threshold_active": 0.7, // active vs unreviewed 분기 임계값
         "boundary_hint_enabled": true, // compacting L1/L2 관련 기억 힌트 표시
+        "gate_a_monitoring_enabled": true, // Gate A 자동 평가 + status/alert 기록 + compacting advisory
     },
 
     // FallbackChain — 다중 모델 환경에서 rate limit 시 자동 전환

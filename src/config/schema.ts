@@ -48,6 +48,7 @@ export interface HarnessSettings {
     rich_fact_metadata_enabled?: boolean;
     confidence_threshold_active?: number;
     boundary_hint_enabled?: boolean;
+    gate_a_monitoring_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -83,6 +84,7 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     rich_fact_metadata_enabled: false,
     confidence_threshold_active: 0.7,
     boundary_hint_enabled: false,
+    gate_a_monitoring_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

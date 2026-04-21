@@ -225,6 +225,40 @@ export interface MemoryMetricRecord {
     json_fact_load_ms?: number;
 }
 
+export type GateAStatusLevel = 'healthy' | 'watch' | 'candidate' | 'triggered';
+
+export interface GateAConditionRecord {
+    key: 'facts_scanned_per_compaction' | 'relations_scanned_per_lookup' | 'hot_context_build_ms' | 'compacting_build_ms' | 'total_fact_count';
+    average_value: number;
+    threshold: number;
+    met: boolean;
+    near_threshold: boolean;
+}
+
+export interface GateAStatusRecord {
+    project_key: string;
+    evaluated_at: string;
+    sample_count: number;
+    status: GateAStatusLevel;
+    conditions: GateAConditionRecord[];
+    met_conditions: GateAConditionRecord['key'][];
+    near_threshold_conditions: GateAConditionRecord['key'][];
+    reasons: string[];
+    recommended_action?: string;
+    first_triggered_at?: string;
+    last_alerted_at?: string;
+}
+
+export interface GateAAlertRecord {
+    id: string;
+    project_key: string;
+    timestamp: string;
+    status: Extract<GateAStatusLevel, 'triggered'>;
+    reasons: string[];
+    recommended_action: string;
+    sample_count: number;
+}
+
 export interface UpperMemoryExtractShadowRecord {
     id: string;
     project_key: string;

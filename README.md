@@ -139,7 +139,9 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── compacting-canary-mismatches.jsonl # Step 5g compacting canary mismatch log
 │   │   ├── memory/
 │   │   │   ├── hot-context.json      # Phase 1a: 세션 간 컨텍스트 캐시
-│   │   │   └── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭
+│   │   │   ├── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭
+│   │   │   ├── gate-a-status.json    # Gate A 자동 평가 상태
+│   │   │   └── gate-a-alerts.jsonl   # Gate A 1회성 알림 로그
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -229,7 +231,8 @@ Phase 1a 기능은 모두 default-off다. `.opencode/harness.jsonc`에서 개별
     "hot_context_enabled": false,
     "rich_fact_metadata_enabled": false,
     "confidence_threshold_active": 0.7,
-    "boundary_hint_enabled": false
+    "boundary_hint_enabled": false,
+    "gate_a_monitoring_enabled": false
   }
 }
 ```
@@ -238,6 +241,7 @@ Phase 1a 기능은 모두 default-off다. `.opencode/harness.jsonc`에서 개별
 - `rich_fact_metadata_enabled`: fact 생성 시 `origin_type` / `confidence` / `status` / `must_verify` / `updated_at` 같은 메타데이터 프록시 분류 활성화
 - `confidence_threshold_active`: `confidence >= threshold`면 `active`, 미만이면 `unreviewed`
 - `boundary_hint_enabled`: compacting L1/L2 레이어에 관련 기억 힌트 추가
+- `gate_a_monitoring_enabled`: 최근 5개 `memory-metrics.jsonl` 이동 평균으로 Gate A를 자동 평가하고, `gate-a-status.json` / `gate-a-alerts.jsonl` 기록 + compacting advisory 주입
 
 기본 운영 추천값은 `confidence_threshold_active: 0.7`이다.
 

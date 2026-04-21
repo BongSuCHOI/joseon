@@ -149,7 +149,7 @@ compacting 시 모든 fact를 전체 내용으로 주입하는 대신, 점수에
 
 #### Phase 1a: 파일 기반 의미론 (Memory v3.2)
 
-Phase 1a는 SQLite/벡터/LLM 없이 기존 파일 기반 시스템에 의미적 패턴을 흡수한다. 모든 기능은 `.opencode/harness.jsonc`의 4개 토글로 제어되며, 기본값은 모두 `false`다.
+Phase 1a는 SQLite/벡터/LLM 없이 기존 파일 기반 시스템에 의미적 패턴을 흡수한다. 모든 기능은 `.opencode/harness.jsonc`의 5개 토글로 제어되며, 기본값은 모두 `false`다.
 
 **토글 설정:**
 
@@ -159,6 +159,7 @@ Phase 1a는 SQLite/벡터/LLM 없이 기존 파일 기반 시스템에 의미적
 | `rich_fact_metadata_enabled` | `false` | fact 메타데이터 자동 분류 (origin_type/confidence/status) |
 | `confidence_threshold_active` | `0.7` | confidence ≥ 임계값 → active, 미만 → unreviewed |
 | `boundary_hint_enabled` | `false` | compacting 시 L1/L2 boundary hint 포함 |
+| `gate_a_monitoring_enabled` | `false` | Gate A 자동 평가 + status/alerts 기록 + compacting advisory |
 
 **기능별 동작:**
 
@@ -171,6 +172,7 @@ Phase 1a는 SQLite/벡터/LLM 없이 기존 파일 기반 시스템에 의미적
 | 안전 퓨즈 확장 | `is_experimental` + scope 불일치 시 승격 차단 | **예** |
 | TTL+Confidence 혼합 정리 | `status` 기반 archive 정책 추가 | 아니오 |
 | 메모리 메트릭 | `memory-metrics.jsonl`에 성능 메트릭 append | **예** |
+| Gate A 자동 모니터링 | 최근 5개 메트릭 이동 평균으로 `gate-a-status.json`/`gate-a-alerts.jsonl` 갱신 | 아니오 |
 
 **Fact 타입 정제:** `origin_type`은 `'user_explicit'`/`'execution_observed'`/`'tool_result'`/`'inferred'` 유니온 리터럴. `status`는 `'active'`/`'unreviewed'`/`'deprecated'`/`'superseded'`. 기존 fact는 새 필드가 선택적이므로 그대로 동작.
 
@@ -329,7 +331,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 - **에이전트별 오버라이드:** `model`, `temperature`, `hidden`, `variant`, `skills`, `mcps`, `options`, `prompt`, `append_prompt`, `deny_tools`
 - **FallbackChain:** 모델 배열로 자동 폴백 지원
 - **Token 최적화 설정:** `tool_loop_threshold`(5), `retry_storm_threshold`(3), `excessive_read_threshold`(4), `fact_ttl_days`(30), `fact_ttl_extend_threshold`(5)
-- **Phase 1a 메모리 의미론:** `hot_context_enabled`(false), `rich_fact_metadata_enabled`(false), `confidence_threshold_active`(0.7), `boundary_hint_enabled`(false) — 모두 default-off
+- **Phase 1a 메모리 의미론:** `hot_context_enabled`(false), `rich_fact_metadata_enabled`(false), `confidence_threshold_active`(0.7), `boundary_hint_enabled`(false), `gate_a_monitoring_enabled`(false) — 모두 default-off
 
 ---
 
@@ -406,7 +408,9 @@ src/
 │   ├── history.jsonl         # 규칙 변경 이력
 │   └── memory/
 │       ├── hot-context.json  # Phase 1a: 세션 간 컨텍스트 캐시 (hot_context_enabled)
-│       └── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭 (항상 수집)
+│       ├── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭 (항상 수집)
+│       ├── gate-a-status.json  # Gate A 자동 평가 상태 (gate_a_monitoring_enabled)
+│       └── gate-a-alerts.jsonl  # Gate A 1회성 알림 로그
 ├── events.jsonl              # 이벤트 로그
 └── logs/sessions/            # 세션 로그 / fact extraction source
 ```

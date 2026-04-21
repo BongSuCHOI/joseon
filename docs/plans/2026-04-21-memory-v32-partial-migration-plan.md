@@ -224,7 +224,9 @@ Phase 전환을 직관이 아닌 **객관적 메트릭**으로 판단한다. Pha
 
 **Gate A 운영 가이드:**
 - 메트릭은 매 compaction 종료 시 자동 기록
-- Gate A 평가는 주 1회 이상 `memory-metrics.jsonl` 리뷰로 수행
+- `gate_a_monitoring_enabled=true`면 최근 5개 `memory-metrics.jsonl` 이동 평균으로 Gate A를 자동 평가
+- 결과는 `gate-a-status.json`에 overwrite, 첫 trigger는 `gate-a-alerts.jsonl`에 1회만 append
+- compacting 시 `[HARNESS MEMORY GATE A]` advisory로 사용자에게 노출 가능
 - 임계값은 초기 운영 데이터로 튜닝 가능. 단, 하향 조정은 신중하게 (조기 SQLite 도입 방지)
 
 ---
