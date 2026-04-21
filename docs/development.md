@@ -42,6 +42,8 @@ rsync -av --delete dist/ .opencode/plugins/harness/
 # OpenCode 재시작
 ```
 
+**로컬 배포 후 재시작:** `npm run deploy` 후 OpenCode 세션을 재시작해야 변경 사항이 반영된다. Phase 1a 토글은 `.opencode/harness.jsonc`에서 변경 후 재시작 시 즉시 적용된다.
+
 ---
 
 ## 3. Build
@@ -71,6 +73,9 @@ Smoke 테스트는 개별 실행:
 ./node_modules/.bin/tsx src/__tests__/smoke-step5g-compacting-canary.ts
 ./node_modules/.bin/tsx src/__tests__/smoke-step5h-ack-acceptance.ts
 
+# memory v3.2 Phase 1a
+./node_modules/.bin/tsx src/__tests__/smoke-phase1a-file-semantics.ts
+
 # unit tests
 ./node_modules/.bin/tsx src/__tests__/unit-step5c-rule-lifecycle.ts
 ./node_modules/.bin/tsx src/__tests__/unit-step5d-release-ops.ts
@@ -84,7 +89,7 @@ Smoke 테스트는 개별 실행:
 npx vitest run
 ```
 
-### Test Files (15개, 580 assertions)
+### Test Files (16개, 685 assertions)
 
 | 파일 | Assertions |
 |------|-----------|
@@ -97,6 +102,7 @@ npx vitest run
 | smoke-step5f-canary.ts | 42 |
 | smoke-step5g-compacting-canary.ts | 74 |
 | smoke-step5h-ack-acceptance.ts | 41 |
+| smoke-phase1a-file-semantics.ts | 105 |
 | unit-step5c-rule-lifecycle.ts | 14 |
 | unit-step5d-release-ops.ts | 14 |
 | test/smoke-test.ts | 46 |
@@ -115,6 +121,7 @@ npx vitest run
 | Step 5a~5h | shadow/guarded 기능 | 통과 |
 | Simplify + consolidate/relate | readability + Phase 제거 + error-recovery 제거 + 메모리 병합/관계 | 564/564 |
 | Token Optimization | Observer 낭비 탐지기 + Fact TTL/접근추적 + 3계층 점근적 공개 | 580/580 |
+| Mem v3.2 Phase 1a | 파일 기반 의미론 (메타데이터 분류, hot context, contradiction, boundary hint, 안전 퓨즈, 메트릭) | 685/685 |
 
 ---
 

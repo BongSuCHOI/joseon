@@ -2,7 +2,7 @@
 
 OpenCode 플러그인 기반 하네스(Harness) + 오케스트레이션(Orchestration) 시스템.
 
-Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.html) 아키텍처를 OpenCode 플러그인 시스템 위에 재구현합니다. 단일 에이전트 품질 제어부터 멀티 에이전트 조율까지 4단계로 점진적으로 구축합니다.
+Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.html) 아키텍처를 OpenCode 플러그인 시스템 위에 재구현합니다. 단일 에이전트 품질 제어부터 멀티 에이전트 조율까지 4단계로 점진적으로 구축했고, Step 5a~5h / Token Optimization / Memory v3.2 Phase 1a까지 완료했습니다.
 
 ## 아키텍처
 
@@ -25,6 +25,8 @@ Hugh Kim의 [Self-Evolving System](https://hugh-kim.space/self-evolving-system.h
 | 2 | 하네스 고도화 | + improver | ✅ 완료 |
 | 3 | 브릿지 | .opencode/rules/ 병행 + Memory Index/Search + history 로테이션 | ✅ 완료 |
 | 4 | 오케스트레이션 | + orchestrator | ✅ 완료 — 4a~4f (안정화 후속 포함). Step 5a~5h 구현/검증 완료 (phase/signal canary smoke 77/77, compacting canary smoke 74/74, ack acceptance smoke 192/192 통과) |
+| Token Opt. | 토큰 최적화 | Observer 낭비 탐지기(3개) + Memory Recall 3계층 공개 + Fact TTL/접근 추적 | ✅ 완료 |
+| Mem v3.2 Phase 1a | 파일 기반 의미론 | Promotion Control + Hot Context + Boundary Hint + Contradiction Surfacing + 안전 퓨즈 확장 + 메트릭 | ✅ 완료 (default-off 토글 4개) |
 
 ### 핵심 원칙
 
@@ -93,7 +95,7 @@ SOFT 규칙 생성 (rules/soft/)
 |----------|------|------|
 | **observer** | `src/harness/observer.ts` | L1 도구 실행 로깅 + L2 에러/불만 signal 생성 |
 | **enforcer** | `src/harness/enforcer.ts` | L4 HARD 차단 + SOFT 위반 추적 + scaffold NEVER DO |
-| **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping |
+| **improver** | `src/harness/improver.ts` | L5 signal→규칙 변환 + fix: 커밋 학습/하드닝 + bounded compacting + L6 승격/효과측정 + .opencode/rules/ 마크다운 동기화 + Memory Index/Search + reduced-safe Step 5b Extract/compacting shadow + Step 5c candidate-first rule lifecycle + Step 5e mistake pattern candidate grouping + **Phase 1a: hot context 생성/주입 + promotion control + boundary hint + contradiction surfacing + 안전 퓨즈 확장 + memory metrics 수집** |
 | **canary** | `src/harness/canary.ts` | Step 5f/5g: metadata-based phase/signal + compacting canary evaluation (`canary_enabled`, `compacting_canary_enabled`, mismatch detection) |
 | **agents** | `src/agents/agents.ts` + `src/agents/prompts/` | 10개 에이전트 정의 + config 콜백 자동 등록 (Step 4b) |
 | **qa-tracker** | `src/orchestrator/qa-tracker.ts` | QA 시나리오별 실패 추적, 3회 시 에스컬레이션 (Step 4c) |
@@ -135,6 +137,9 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── mistake-pattern-candidates.jsonl # Step 5e mistake pattern candidate log
 │   │   ├── canary-mismatches.jsonl # Step 5f canary mismatch log
 │   │   ├── compacting-canary-mismatches.jsonl # Step 5g compacting canary mismatch log
+│   │   ├── memory/
+│   │   │   ├── hot-context.json      # Phase 1a: 세션 간 컨텍스트 캐시
+│   │   │   └── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
 │   │   └── .session-lock            # PID 세션 락 (동시 실행 방지)
 │   ├── global/
@@ -214,6 +219,28 @@ npm run deploy
 }
 ```
 
+### Phase 1a 메모리 의미론 설정
+
+Phase 1a 기능은 모두 default-off다. `.opencode/harness.jsonc`에서 개별 토글로 점진적으로 켤 수 있다.
+
+```jsonc
+{
+  "harness": {
+    "hot_context_enabled": false,
+    "rich_fact_metadata_enabled": false,
+    "confidence_threshold_active": 0.7,
+    "boundary_hint_enabled": false
+  }
+}
+```
+
+- `hot_context_enabled`: `session.idle` 시 `projects/{key}/memory/hot-context.json` 생성, compacting에서 scaffold 앞에 주입
+- `rich_fact_metadata_enabled`: fact 생성 시 `origin_type` / `confidence` / `status` / `must_verify` / `updated_at` 같은 메타데이터 프록시 분류 활성화
+- `confidence_threshold_active`: `confidence >= threshold`면 `active`, 미만이면 `unreviewed`
+- `boundary_hint_enabled`: compacting L1/L2 레이어에 관련 기억 힌트 추가
+
+기본 운영 추천값은 `confidence_threshold_active: 0.7`이다.
+
 자세한 개발/테스트 절차는 [`docs/development.md`](docs/development.md)를 참조.
 
 ## 프로젝트 구조
@@ -221,7 +248,7 @@ npm run deploy
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
-├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate, ConsolidationRecord, FactRelation 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate, ConsolidationRecord, FactRelation + Phase 1a(FactOriginType, FactStatus, HotContext, MemoryMetricRecord) 타입 정의
 ├── config/                      # A2: 설정 시스템
 │   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
 │   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
@@ -243,7 +270,7 @@ src/
 ├── harness/
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
-│   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프 + Memory consolidate/relate
+│   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프 + Memory consolidate/relate + Phase 1a(hot context, promotion control, boundary hint, contradiction, 안전 퓨즈, memory metrics)
 │   └── canary.ts                # Step 5f/5g: metadata-based phase/signal + compacting canary evaluation
 ├── orchestrator/
 │   ├── orchestrator.ts          # Plugin 4: qa-tracker wiring + agent_id injection (Step 4D~4f)
@@ -324,7 +351,7 @@ src/
 git clone <repo-url>
 cd harness-orchestration
 npm install
-npm run build
+npm run deploy
 ```
 
 ### 2. OpenCode에 플러그인 등록

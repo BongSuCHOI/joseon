@@ -20,6 +20,7 @@
 | 4 | 오케스트레이션 | + orchestrator (서브에이전트 라우팅, QA 추적 연동) | ✅ 완료 |
 | 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 활성화 — .opencode/harness.jsonc에서 토글 ON) |
 | Token Opt. | 토큰 최적화 | Observer 낭비 탐지기(3개) + Memory Recall 3계층 공개 + Fact TTL/접근 추적 | ✅ 완료 |
+| Mem v3.2 Phase 1a | 파일 기반 의미론 | Promotion Control + Hot Context + Boundary Hint + Contradiction Surfacing + 안전 퓨즈 확장 + 메트릭 | ✅ 완료 (default-off, .opencode/harness.jsonc에서 4개 토글) |
 
 ---
 
@@ -124,8 +125,11 @@ HARD 승격 (rules/hard/{id}.json)
 #### Compacting (컨텍스트 주입)
 
 - `experimental.session.compacting` 훅에서 동작
-- scaffold + HARD 규칙 + SOFT 규칙을 세션 컨텍스트에 주입
+- **주입 순서:** hot context → scaffold → HARD 규칙 → SOFT 규칙 → 메모리 (3계층)
+  - Phase 1a hot context는 `hot_context_enabled=true` 시에만 scaffold 앞에 주입
+  - Boundary hint는 `boundary_hint_enabled=true` 시 L1/L2 레이어에 포함
 - `scope:prompt` 규칙은 세션 시작부터 `.opencode/rules/`에 노출되어, compacting이 발동하지 않는 짧은 세션에서도 에이전트가 규칙을 인지
+- **Project-scoped 격리:** compacting은 현재 project_key와 일치하는 fact만 주입. 다른 프로젝트 fact와 legacy(빈 project_key) fact는 제외
 
 #### Memory Fact 접근 추적 및 TTL
 
@@ -142,6 +146,44 @@ compacting 시 모든 fact를 전체 내용으로 주입하는 대신, 점수에
 - **Layer 2 (요약):** 점수 중간 40% fact — id + keywords + 첫 문장 (~50 토큰/fact)
 - **Layer 1 (인덱스):** 점수 하위 30% fact — id + keywords만 (~15 토큰/fact)
 - **조건:** `semantic_compacting_enabled=true` + fact > 2개일 때만 적용. 비활성화 시 기존 방식(L3 전체) 유지
+
+#### Phase 1a: 파일 기반 의미론 (Memory v3.2)
+
+Phase 1a는 SQLite/벡터/LLM 없이 기존 파일 기반 시스템에 의미적 패턴을 흡수한다. 모든 기능은 `.opencode/harness.jsonc`의 4개 토글로 제어되며, 기본값은 모두 `false`다.
+
+**토글 설정:**
+
+| 설정 | 기본값 | 담당 기능 |
+|------|--------|-----------|
+| `hot_context_enabled` | `false` | Hot Context 생성 + compacting 주입 |
+| `rich_fact_metadata_enabled` | `false` | fact 메타데이터 자동 분류 (origin_type/confidence/status) |
+| `confidence_threshold_active` | `0.7` | confidence ≥ 임계값 → active, 미만 → unreviewed |
+| `boundary_hint_enabled` | `false` | compacting 시 L1/L2 boundary hint 포함 |
+
+**기능별 동작:**
+
+| 기능 | 설명 | 항상 활성 |
+|------|------|----------|
+| Promotion Control | `origin_type`/`confidence`/`status` 메타데이터 프록시 자동 분류 | 아니오 |
+| Hot Context | `session.idle` 시 `hot-context.json` 생성, compacting 시 scaffold 앞 주입 | 아니오 |
+| Boundary Hint | L1/L2 fact에 "관련 기억 있음" 힌트 포함 | 아니오 |
+| Contradiction Surfacing | `consolidateFacts()` 충돌 시 `must_verify` 자동 부여 | 아니오 (metadata 토글 필요) |
+| 안전 퓨즈 확장 | `is_experimental` + scope 불일치 시 승격 차단 | **예** |
+| TTL+Confidence 혼합 정리 | `status` 기반 archive 정책 추가 | 아니오 |
+| 메모리 메트릭 | `memory-metrics.jsonl`에 성능 메트릭 append | **예** |
+
+**Fact 타입 정제:** `origin_type`은 `'user_explicit'`/`'execution_observed'`/`'tool_result'`/`'inferred'` 유니온 리터럴. `status`는 `'active'`/`'unreviewed'`/`'deprecated'`/`'superseded'`. 기존 fact는 새 필드가 선택적이므로 그대로 동작.
+
+**Hot Context 주입 포맷:**
+```
+[HARNESS HOT CONTEXT — previous session summary]
+⚠ Contradictions to verify:
+- [id] 충돌 내용 (needs verification)
+
+Key decisions from previous sessions:
+- [id] 결정 내용
+```
+Spoofed `[HARNESS ...]` 헤더와 마크다운은 fact content에서 자동 제거된다.
 
 ---
 
@@ -222,7 +264,7 @@ bash tool output → test failure 패턴 감지 (orchestrator hook)
 | **Search** | 키워드 기반 회수 | `projects/{key}/memory/search/` |
 | **history.jsonl 로테이션** | 파일 크기 체크 + 일정 크기 초과 시 rotate | 로테이션된 아카이브 |
 
-### 상위 4단계 (shadow/candidate, 비활성)
+### 상위 4단계 (활성 + Phase 1a 의미론 확장)
 
 | 단계 | 현재 상태 | 설명 |
 |------|----------|------|
@@ -231,7 +273,7 @@ bash tool output → test failure 패턴 감지 (orchestrator hook)
 | **Relate** | ✅ 활성 | 키워드 기반 fact 관계 연결 (relateFacts, relations.jsonl) |
 | **Recall** | ✅ 활성 — 3계층 점진적 공개 (semantic compacting 시 점수 기반 L1/L2/L3 분할) | compacting 시 점수에 따라 fact를 3계층으로 분할 주입 |
 
-Recall은 3계층 점진적 공개로 구현 완료. 상위 4단계 전부 활성화.
+Recall은 3계층 점진적 공개로 구현 완료되었고, Phase 1a에서 hot context, metadata 기반 ranking, contradiction surfacing, safety fuse, boundary hint, memory metrics가 파일 기반으로 추가되었다.
 
 ---
 
@@ -287,6 +329,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 - **에이전트별 오버라이드:** `model`, `temperature`, `hidden`, `variant`, `skills`, `mcps`, `options`, `prompt`, `append_prompt`, `deny_tools`
 - **FallbackChain:** 모델 배열로 자동 폴백 지원
 - **Token 최적화 설정:** `tool_loop_threshold`(5), `retry_storm_threshold`(3), `excessive_read_threshold`(4), `fact_ttl_days`(30), `fact_ttl_extend_threshold`(5)
+- **Phase 1a 메모리 의미론:** `hot_context_enabled`(false), `rich_fact_metadata_enabled`(false), `confidence_threshold_active`(0.7), `boundary_hint_enabled`(false) — 모두 default-off
 
 ---
 
@@ -313,7 +356,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 | ~~Phase 구조~~ | Phase 0~4 다단계 LLM 판정 | 제거됨 (`signalToRule()` 결정적 코드로 대체) | 플러그인에서 LLM 호출 불가 + 비결정성 회피 |
 | Cross-Project 승격 | 2개 프로젝트에서 동일 패턴 → global 자동 승격 | 수동 `project_key: 'global'` | 단일 프로젝트 환경, 오버엔지니어링 |
 | Pruning | 효과 없는 규칙 자동 삭제 | 측정만 자동, 삭제는 수동 | 삭제 기준 오류 시 복구 불가 |
-| Memory 상위 4단계 | 7단계 전체 구현 | 하위 3단계 + Consolidate/Relate (5/7) | Recall만 미구현 |
+| Memory 상위 4단계 | 7단계 전체 구현 | 상위 4단계 활성 + Phase 1a 의미론(hot context, 메타데이터 분류, contradiction, boundary hint) | SQLite/벡터/LLM은 Phase 1b~3으로 연기 |
 | Event 훅 병합 | 스프레드 연산자 (v3 버그) | `mergeEventHandlers` 유틸리티 | 오라클 크로스 리뷰에서 발견한 CRITICAL 버그 수정 |
 
 ---
@@ -348,6 +391,10 @@ src/
 런타임 데이터 구조:
 ```
 ~/.config/opencode/harness/
+├── memory/
+│   ├── facts/{id}.json         # project_key 포함 fact 저장소 (global shared path)
+│   ├── archive/{id}.json       # TTL/consolidate로 이동된 fact archive
+│   └── relations.jsonl         # fact 관계 (relate 단계)
 ├── projects/{project_key}/
 │   ├── state.json            # 프로젝트 상태
 │   ├── scaffold.md           # NEVER DO scaffold
@@ -358,10 +405,8 @@ src/
 │   ├── ack/{id}.json         # 처리 완료 Signal
 │   ├── history.jsonl         # 규칙 변경 이력
 │   └── memory/
-│       ├── archive/          # 세션 JSONL 아카이브
-│       ├── index/            # 키워드 인덱스
-│       ├── search/           # 검색 결과
-│       └── relations.jsonl   # fact 간 키워드 기반 관계 (relate 단계)
+│       ├── hot-context.json  # Phase 1a: 세션 간 컨텍스트 캐시 (hot_context_enabled)
+│       └── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭 (항상 수집)
 ├── events.jsonl              # 이벤트 로그
-└── sessions/                 # 세션 관리
+└── logs/sessions/            # 세션 로그 / fact extraction source
 ```

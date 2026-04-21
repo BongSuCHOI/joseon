@@ -166,6 +166,11 @@ export interface AckRecord {
     acceptance_verdict?: 'accepted' | 'rejected';
 }
 
+// Phase 1a: Fact metadata literal unions
+export type FactOriginType = 'user_explicit' | 'execution_observed' | 'tool_result' | 'inferred';
+export type FactStatus = 'active' | 'unreviewed' | 'deprecated' | 'superseded';
+export type FactSeverity = 'low' | 'medium' | 'high';
+
 export interface MemoryFact {
     id: string;
     project_key?: string;
@@ -173,8 +178,51 @@ export interface MemoryFact {
     content: string;
     source_session: string;
     created_at: string;
+    updated_at?: string;        // Phase 1a: revision tracking (updated_at level)
     last_accessed_at?: number;
     access_count?: number;
+    // Phase 1a metadata
+    origin_type?: FactOriginType;
+    confidence?: number;        // 0.0 ~ 1.0
+    status?: FactStatus;
+    scope?: string;             // project_key-equivalent scope identifier
+    evidence_count?: number;
+    must_verify?: boolean;
+    is_experimental?: boolean;
+    severity?: FactSeverity;
+    agent_role?: string;
+}
+
+export interface HotContextEntry {
+    id: string;
+    content: string;
+    origin_type: FactOriginType;
+    confidence: number;
+    must_verify?: boolean;
+}
+
+export interface HotContext {
+    project_key: string;
+    generated_at: string;
+    session_count: number;
+    facts: HotContextEntry[];
+    contradictions: HotContextEntry[];
+}
+
+export interface MemoryMetricRecord {
+    ts: string;
+    phase: string;
+    active_fact_count: number;
+    total_fact_count: number;
+    relation_count: number;
+    revision_count: number;
+    hot_context_build_ms: number;
+    compacting_build_ms: number;
+    contradiction_count: number;
+    // Temp metrics (Phase 1a only)
+    facts_scanned_per_compaction?: number;
+    relations_scanned_per_lookup?: number;
+    json_fact_load_ms?: number;
 }
 
 export interface UpperMemoryExtractShadowRecord {

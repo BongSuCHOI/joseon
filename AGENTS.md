@@ -7,7 +7,7 @@
 # Project
 
 **harness-orchestration** — OpenCode 플러그인 기반 하네스 + 오케스트레이션 시스템.
-Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 + Step 5a~5h + Token Optimization(Observer 낭비 탐지, Memory Recall 3계층, Fact TTL) 전부 완료.
+Hugh Kim의 아키텍처를 OpenCode 플러그인으로 재구현. 단일 에이전트 품질 제어(하네스)부터 멀티 에이전트 조율(오케스트레이션)까지 4단계 점진 구축. Step 1~4 + Step 5a~5h + Token Optimization(Observer 낭비 탐지, Memory Recall 3계층, Fact TTL) + Memory v3.2 Phase 1a(메타데이터 분류, hot context, contradiction surfacing, boundary hint, 안전 퓨즈 확장, 메트릭 수집) 전부 완료.
 
 # Core Rules
 
@@ -46,12 +46,13 @@ src/
 
 | 문서 | 내용 |
 |------|------|
-| [`docs/architecture.md`](docs/architecture.md) | 전체 시스템 아키텍처 (하네스 4단계, L1~L6, 폐루프, 메모리 consolidate/relate) |
+| [`docs/architecture.md`](docs/architecture.md) | 전체 시스템 아키텍처 (하네스 4단계, L1~L6, 폐루프, 메모리 consolidate/relate, Phase 1a 의미론) |
 | [`docs/conventions.md`](docs/conventions.md) | 코딩 규칙, 플러그인 export 패턴, import 규칙 |
 | [`docs/development.md`](docs/development.md) | 개발/빌드/테스트 절차, OpenSpec 워크플로우 |
-| [`docs/roadmap.md`](docs/roadmap.md) | 향후 고도화 로드맵 (shadow→guarded→mainline 승격 기준) |
+| [`docs/roadmap.md`](docs/roadmap.md) | 향후 고도화 로드맵 (shadow→guarded→mainline 승격 기준, Phase 1b/2/3 연기 항목) |
 | [`docs/v3-final.md`](docs/opencode-harness-orchestration-guide-v3-final.md) | 초기 구현 가이드 (레거시 참고용, 현재 아키텍처와 다를 수 있음) |
 | [`docs/api-confirmation.md`](docs/api-confirmation.md) | OpenCode Plugin API 확인 문서 |
+| [`docs/plans/`](docs/plans/) | Memory v3.2 마이그레이션 마스터 플랜 + Phase 1a 상세 설계 |
 
 # Key References
 

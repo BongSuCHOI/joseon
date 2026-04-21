@@ -48,7 +48,7 @@
 
 | 항목 | 현재 상태 | 권장 모드 |
 |------|----------|----------|
-| 1. 크로스세션 기억 상위 4단계 | Consolidate/Relate 활성, Extract shadow, Recall 활성 (3계층 점진적 공개) | 활성 |
+| 1. 크로스세션 기억 상위 4단계 | Consolidate/Relate 활성, Extract shadow, Recall 활성 (3계층 점진적 공개) + **Phase 1a 완료: 메타데이터 분류, hot context, contradiction surfacing, boundary hint, 안전 퓨즈 확장, 메트릭 수집** | 활성 (Phase 1a default-off 토글로 제어) |
 | 2. 규칙 자동 삭제 (Pruning) | candidate-first pruning + append-only log | guarded-off |
 | 3. 의미 기반 compacting 필터 | relevance shadow + compacting canary (5g) + 3계층 점진적 공개 | 활성 (semantic_compacting_enabled=true) |
 | 4. LLM 기반 signal 판정 | deterministic baseline + canary (5f) | 활성 (canary_enabled=true) |
@@ -64,6 +64,10 @@
 ### 현재 상태
 
 `Sync / Index / Search`가 본 경로다. Consolidate(`consolidateFacts`)와 Relate(`relateFacts`)가 활성화되었다. Recall은 3계층 점진적 공개로 구현되었다 — compacting 시 fact를 점수 기준으로 L3(전체)/L2(요약)/L1(인덱스)로 분할하여 주입 토큰을 ~70-90% 절감한다.
+
+**Phase 1a (완료):** 파일 기반 의미론이 구현되었다. `origin_type`/`confidence`/`status` 메타데이터 프록시 분류, `hot-context.json` 자동 생성 및 compacting scaffold 앞 주입, `consolidateFacts()` 충돌 시 `must_verify` 부여, `is_experimental` + scope 불일치 승격 차단, `boundary_hint_enabled` 시 L1/L2 관련 기억 힌트, `memory-metrics.jsonl` 성능 메트릭 수집. 4개 토글(`hot_context_enabled`, `rich_fact_metadata_enabled`, `confidence_threshold_active`, `boundary_hint_enabled`)이 `.opencode/harness.jsonc`에 추가되었고 모두 default-off.
+
+**Phase 1b/2/3 (연기):** SQLite 도입, FTS5/벡터 검색, LLM 기반 fact 추출은 Gate A 메트릭(`memory-metrics.jsonl`) 기반으로 필요성이 확인되면 착수.
 
 ### 의도
 
@@ -99,7 +103,7 @@
 
 - shadow 로그만으로도 추출 후보와 실제 맥락이 구분되는 사례가 충분히 쌓였는지 본다.
 - 사람 검토로 mismatch 묶음을 확인했을 때, 어떤 부분이 추출 오류인지 재현 가능해야 한다.
-- Consolidate / Relate는 활성화 완료. Recall은 계속 비활성.
+- Consolidate / Relate / Recall은 모두 활성화 완료. Recall은 3계층 점진적 공개 + Phase 1a hot context 보강 경로로 동작한다.
 - canary에서 baseline 대비 회수 품질이 떨어지면 즉시 shadow로 되돌릴 수 있어야 한다.
 - 실제 본 경로 반영은 pass/fail가 아니라, 반복 검토 후에도 오판이 줄어드는 것이 확인된 뒤에만 한다.
 
@@ -130,6 +134,9 @@
 ### 아직 비활성
 
 - LLM/embedding 기반 심층 Recall (현재는 메타데이터 점수 기반)
+- SQLite 도입 (Phase 1b, Gate A 메트릭 기반)
+- 벡터 임베딩 / 의미 검색 (Phase 3)
+- LLM 기반 fact 추출 (Phase 3, 서브에이전트 위임 패턴)
 - 상위 4단계의 본 경로 판정
 - 전체 세션 대상 자동 승격
 - 실패 사례를 근거 없이 즉시 덮어쓰기

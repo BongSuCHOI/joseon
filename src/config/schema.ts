@@ -43,6 +43,11 @@ export interface HarnessSettings {
     excessive_read_threshold?: number;
     fact_ttl_days?: number;
     fact_ttl_extend_threshold?: number;
+    // Phase 1a settings
+    hot_context_enabled?: boolean;
+    rich_fact_metadata_enabled?: boolean;
+    confidence_threshold_active?: number;
+    boundary_hint_enabled?: boolean;
 }
 
 export interface HarnessConfig {
@@ -73,6 +78,11 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     excessive_read_threshold: 4,
     fact_ttl_days: 30,
     fact_ttl_extend_threshold: 5,
+    // Phase 1a defaults (all off)
+    hot_context_enabled: false,
+    rich_fact_metadata_enabled: false,
+    confidence_threshold_active: 0.7,
+    boundary_hint_enabled: false,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

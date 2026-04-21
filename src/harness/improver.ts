@@ -14,6 +14,11 @@ import type {
     AckRecord,
     AckAcceptanceResult,
     MemoryFact,
+    FactOriginType,
+    FactStatus,
+    HotContext,
+    HotContextEntry,
+    MemoryMetricRecord,
     UpperMemoryExtractShadowRecord,
     CompactionRelevanceShadowRecord,
     RulePruneCandidateRecord,
@@ -32,6 +37,10 @@ const DIFF_MAX_CHARS = 12000;
 const DIFF_MAX_LINES = 400;
 const COMPACTION_QUERY_MAX_LENGTH = 1000;
 const FACT_KEYWORD_MAX_LENGTH = 200;
+// Phase 1a constants
+const HOT_CONTEXT_MAX_CHARS = 2000;  // ~500 tokens estimate
+const METRICS_MAX_BYTES = 1048576;   // 1MB
+const METRICS_ROTATE_DAYS = 30;
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -539,6 +548,360 @@ function parseIsoDate(value?: string): number {
     return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+// ─── Phase 1a: Promotion Control — metadata-based classification ──
+
+export function classifyOriginType(fact: MemoryFact): FactOriginType {
+    const content = fact.content.toLowerCase();
+    const keywords = fact.keywords.map(k => k.toLowerCase());
+
+    // 1. user_explicit: directive patterns
+    const directivePatterns = [/반드시/, /절대/, /항상/, /never/i, /always/i, /must/i, /절대로/, /무조건/];
+    if (directivePatterns.some(p => p.test(content))) return 'user_explicit';
+
+    // 2. execution_observed: tool execution result patterns
+    if (content.includes('exit code') || content.includes('stdout') || content.includes('stderr')) {
+        return 'execution_observed';
+    }
+
+    // 3. tool_result: file/search result patterns
+    if (keywords.some(k => ['read', 'search', 'grep', 'file'].includes(k))) {
+        return 'tool_result';
+    }
+
+    // 4. Default
+    return 'inferred';
+}
+
+export function computeConfidence(originType: FactOriginType): number {
+    switch (originType) {
+        case 'user_explicit': return 0.9;
+        case 'execution_observed': return 0.85;
+        case 'tool_result': return 0.8;
+        case 'inferred': return 0.5;
+    }
+}
+
+export function determineFactStatus(confidence: number, threshold: number): FactStatus {
+    return confidence >= threshold ? 'active' : 'unreviewed';
+}
+
+export function enrichFactMetadata(fact: MemoryFact, settings: { rich_fact_metadata_enabled: boolean; confidence_threshold_active: number }): MemoryFact {
+    if (!settings.rich_fact_metadata_enabled) return fact;
+
+    const originType = classifyOriginType(fact);
+    const confidence = computeConfidence(originType);
+    const status = determineFactStatus(confidence, settings.confidence_threshold_active);
+
+    return {
+        ...fact,
+        origin_type: originType,
+        confidence,
+        status,
+        updated_at: new Date().toISOString(),
+    };
+}
+
+// ─── Phase 1a: Hot Context ──────────────────────────────
+
+function getHotContextPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'memory', 'hot-context.json');
+}
+
+function getMemoryMetricsPath(projectKey: string): string {
+    return join(HARNESS_DIR, 'projects', projectKey, 'memory', 'memory-metrics.jsonl');
+}
+
+export function generateHotContext(projectKey: string, facts: MemoryFact[]): HotContext {
+    // Filter to current project only + active facts (status: 'active' or undefined)
+    const activeFacts = facts.filter(f =>
+        f.project_key === projectKey &&
+        (!f.status || f.status === 'active')
+    );
+
+    // Separate contradictions (must_verify) from regular facts
+    const contradictions: HotContextEntry[] = activeFacts
+        .filter(f => f.must_verify === true)
+        .map(f => ({
+            id: f.id,
+            content: f.content,
+            origin_type: f.origin_type ?? 'inferred',
+            confidence: f.confidence ?? 0.5,
+            must_verify: true,
+        }));
+
+    // Regular facts: prioritize by origin_type, confidence, recency
+    const regularFacts = activeFacts
+        .filter(f => !f.must_verify)
+        .sort((a, b) => {
+            // user_explicit first
+            const aType = a.origin_type ?? 'inferred';
+            const bType = b.origin_type ?? 'inferred';
+            const typeOrder: Record<string, number> = { user_explicit: 0, execution_observed: 1, tool_result: 2, inferred: 3 };
+            const typeDiff = (typeOrder[aType] ?? 3) - (typeOrder[bType] ?? 3);
+            if (typeDiff !== 0) return typeDiff;
+            // Then by confidence descending
+            const confDiff = (b.confidence ?? 0.5) - (a.confidence ?? 0.5);
+            if (Math.abs(confDiff) > 0.01) return confDiff;
+            // Then by recency
+            return (b.updated_at ?? b.created_at).localeCompare(a.updated_at ?? a.created_at);
+        });
+
+    // Budget: ~5-10 facts total
+    const maxRegular = Math.max(0, 10 - contradictions.length);
+    const selectedFacts: HotContextEntry[] = regularFacts.slice(0, maxRegular).map(f => ({
+        id: f.id,
+        content: f.content,
+        origin_type: f.origin_type ?? 'inferred',
+        confidence: f.confidence ?? 0.5,
+        must_verify: f.must_verify,
+    }));
+
+    // Read previous session_count for continuity
+    const previous = readHotContext(projectKey);
+    const sessionCount = previous ? previous.session_count + 1 : 1;
+
+    return {
+        project_key: projectKey,
+        generated_at: new Date().toISOString(),
+        session_count: sessionCount,
+        facts: selectedFacts,
+        contradictions,
+    };
+}
+
+export function writeHotContext(projectKey: string, ctx: HotContext): void {
+    const dir = join(HARNESS_DIR, 'projects', projectKey, 'memory');
+    mkdirSync(dir, { recursive: true });
+
+    // Enforce character budget
+    const serialized = JSON.stringify(ctx);
+    if (serialized.length > HOT_CONTEXT_MAX_CHARS) {
+        // Truncate facts to fit
+        const budget = ctx;
+        while (JSON.stringify(budget).length > HOT_CONTEXT_MAX_CHARS && budget.facts.length > 0) {
+            budget.facts.pop();
+        }
+        writeFileSync(getHotContextPath(projectKey), JSON.stringify(budget, null, 2));
+    } else {
+        writeFileSync(getHotContextPath(projectKey), JSON.stringify(ctx, null, 2));
+    }
+}
+
+export function readHotContext(projectKey: string): HotContext | null {
+    const path = getHotContextPath(projectKey);
+    if (!existsSync(path)) return null;
+    try {
+        return JSON.parse(readFileSync(path, 'utf-8')) as HotContext;
+    } catch {
+        return null;
+    }
+}
+
+export function formatHotContextForCompacting(ctx: HotContext): string {
+    // Sanitize: strip harness-bracket headers and common injection patterns from fact content
+    const sanitize = (raw: string): string =>
+        raw
+            .replace(/\[HARNESS[^\]]*\]/gi, '')   // strip [HARNESS ...] headers
+            .replace(/#{1,6}\s/g, '')              // strip markdown headers (# ## etc.)
+            .replace(/^[-*]\s/gm, '')              // strip markdown list markers (- /*)
+            .replace(/^\d+\.\s/gm, '')             // strip numbered list markers (1. 2. etc.)
+            .replace(/\s+/g, ' ')                  // collapse all whitespace to single space
+            .trim()
+            .slice(0, 120);                         // hard truncation
+
+    const lines: string[] = ['[HARNESS HOT CONTEXT — previous session summary]'];
+
+    if (ctx.contradictions.length > 0) {
+        lines.push('⚠ Contradictions to verify:');
+        for (const c of ctx.contradictions) {
+            lines.push(`- [${c.id.slice(0, 8)}] ${sanitize(c.content)} (needs verification)`);
+        }
+        lines.push('');
+    }
+
+    if (ctx.facts.length > 0) {
+        lines.push('Key decisions from previous sessions:');
+        for (const f of ctx.facts) {
+            lines.push(`- [${f.id.slice(0, 8)}] ${sanitize(f.content)}`);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+// ─── Phase 1a: Contradiction Detection ──────────────────
+
+export function detectContradiction(contentA: string, contentB: string): boolean {
+    const negationPatterns = [/not/i, /no\b/i, /don'?t/i, /doesn'?t/i, /하지\s*않/, /금지/, /불가/];
+    const aHasNeg = negationPatterns.some(p => p.test(contentA));
+    const bHasNeg = negationPatterns.some(p => p.test(contentB));
+    // Only a contradiction if one has negation and the other doesn't
+    return aHasNeg !== bHasNeg;
+}
+
+// ─── Phase 1a: 3-layer Weighted Ranking ─────────────────
+
+function getFactTypeMultiplier(fact: MemoryFact): number {
+    switch (fact.origin_type) {
+        case 'user_explicit': return 1.5;
+        case 'execution_observed': return 1.3;
+        case 'tool_result': return 1.1;
+        default: return 1.0;
+    }
+}
+
+export function rankFactsWithWeights(
+    candidates: Array<{ fact: MemoryFact; metadata_score: number; lexical_score: number }>,
+): Array<{ fact: MemoryFact; weighted_score: number }> {
+    return candidates.map(c => {
+        // Phase 1a-4: Exclude deprecated/superseded from ranking entirely
+        if (c.fact.status === 'deprecated' || c.fact.status === 'superseded') {
+            return { fact: c.fact, weighted_score: -1 };
+        }
+
+        const baseScore = (c.metadata_score + c.lexical_score) / 2;
+        const typeMultiplier = getFactTypeMultiplier(c.fact);
+        const confidence = c.fact.confidence ?? 0.5;
+
+        // Phase 1a-4: Demote low-confidence unreviewed facts
+        const isLowConfUnreviewed = c.fact.status === 'unreviewed' && confidence < 0.5;
+        const demotionMultiplier = isLowConfUnreviewed ? 0.1 : 1.0;
+
+        const weightedScore = baseScore * typeMultiplier * confidence * demotionMultiplier;
+        return { fact: c.fact, weighted_score: weightedScore };
+    }).sort((a, b) => b.weighted_score - a.weighted_score);
+}
+
+// ─── Phase 1a: Safety Fuse ──────────────────────────────
+
+export function isPromotionBlocked(rule: Rule, projectKey: string): boolean {
+    // scope: 'prompt' rules never promote (existing behavior)
+    if (rule.pattern.scope === 'prompt') return true;
+
+    // Scope mismatch: different project
+    if (rule.project_key !== 'global' && rule.project_key !== projectKey) return true;
+
+    return false;
+}
+
+export function isFactBasedPromotionBlocked(rule: Rule, projectKey: string, facts: MemoryFact[]): boolean {
+    // Only check facts belonging to the current project
+    const projectFacts = facts.filter(f =>
+        f.project_key === projectKey
+    );
+    // Check if any fact linked to the rule is experimental
+    const relatedFacts = projectFacts.filter(f =>
+        rule.pattern.match && f.content.toLowerCase().includes(rule.pattern.match.toLowerCase())
+    );
+    if (relatedFacts.some(f => f.is_experimental === true)) {
+        return true;
+    }
+    return false;
+}
+
+// ─── Phase 1a: Memory Metrics ───────────────────────────
+
+export function appendMemoryMetrics(projectKey: string, metrics: MemoryMetricRecord): void {
+    const dir = join(HARNESS_DIR, 'projects', projectKey, 'memory');
+    mkdirSync(dir, { recursive: true });
+
+    const metricsPath = getMemoryMetricsPath(projectKey);
+
+    // Rotate if file too large
+    if (existsSync(metricsPath)) {
+        try {
+            // Use readFileSync to check size indirectly via line count
+            const content = readFileSync(metricsPath, 'utf-8');
+            const lines = content.split('\n').filter(Boolean);
+            if (content.length > METRICS_MAX_BYTES && lines.length > 10) {
+                // Keep only last 30 days
+                const cutoff = Date.now() - METRICS_ROTATE_DAYS * 24 * 60 * 60 * 1000;
+                const kept = lines.filter(line => {
+                    try {
+                        const rec = JSON.parse(line);
+                        return Date.parse(rec.ts) >= cutoff;
+                    } catch { return true; }
+                });
+                writeFileSync(metricsPath, kept.join('\n') + '\n');
+            }
+        } catch { /* rotation failure non-fatal */ }
+    }
+
+    appendRecord(metricsPath, metrics);
+}
+
+export function collectMemoryMetrics(
+    projectKey: string,
+    sessionStartTime: number,
+    hotContextBuildMs: number,
+    compactingBuildMs: number,
+): MemoryMetricRecord {
+    const loadStart = Date.now();
+
+    const factsDir = join(HARNESS_DIR, 'memory/facts');
+    const archiveDir = join(HARNESS_DIR, 'memory/archive');
+    const relationsPath = join(HARNESS_DIR, 'memory/relations.jsonl');
+
+    // Project-aware: count only current project's facts
+    const allActiveFacts = existsSync(factsDir) ? loadJsonFiles<MemoryFact>(factsDir) : [];
+    const projectFacts = allActiveFacts.filter(f =>
+        f.project_key === projectKey
+    );
+    const archiveCount = existsSync(archiveDir)
+        ? readdirSync(archiveDir)
+            .filter(f => f.endsWith('.json'))
+            .map(f => {
+                try {
+                    return JSON.parse(readFileSync(join(archiveDir, f), 'utf-8')) as MemoryFact;
+                } catch { return null; }
+            })
+            .filter(f => f && f.project_key === projectKey)
+            .length
+        : 0;
+    const relations = loadJsonlRecords<FactRelation>(relationsPath)
+        .filter(r => r.project_key === projectKey);
+
+    const jsonFactLoadMs = Date.now() - loadStart;
+
+    return {
+        ts: new Date().toISOString(),
+        phase: '1a',
+        active_fact_count: projectFacts.length,
+        total_fact_count: projectFacts.length + archiveCount,
+        relation_count: relations.length,
+        revision_count: 0,
+        hot_context_build_ms: hotContextBuildMs,
+        compacting_build_ms: compactingBuildMs,
+        contradiction_count: projectFacts.filter(f => f.must_verify === true).length,
+        facts_scanned_per_compaction: projectFacts.length,
+        relations_scanned_per_lookup: relations.length,
+        json_fact_load_ms: jsonFactLoadMs,
+    };
+}
+
+// ─── Phase 1a: Boundary Hints ───────────────────────────
+
+export function buildBoundaryHints(facts: MemoryFact[], ranked: Array<{ fact: MemoryFact }>): string[] {
+    const hints: string[] = [];
+    const factIds = new Set(facts.map(f => f.id));
+
+    for (const entry of ranked) {
+        const fact = entry.fact;
+        // Count related facts (shared keywords)
+        const relatedCount = facts.filter(f =>
+            f.id !== fact.id &&
+            f.keywords.some(k => fact.keywords.map(kk => kk.toLowerCase()).includes(k.toLowerCase()))
+        ).length;
+
+        if (relatedCount > 0) {
+            const mustVerifySuffix = fact.must_verify ? ' ⚠ 검증 필요' : '';
+            hints.push(`- [${fact.id.slice(0, 8)}] keywords: ${fact.keywords.join(', ')} — 관련 기억 ${relatedCount}건 있음${mustVerifySuffix}`);
+        }
+    }
+
+    return hints;
+}
+
 export function normalizeFactAccess(fact: MemoryFact): MemoryFact {
     return {
         ...fact,
@@ -1019,6 +1382,18 @@ function promoteRules(projectKey: string, worktree: string, threshold: number): 
         if (rule.pattern.scope === 'prompt') continue;
         if (rule.project_key !== projectKey && rule.project_key !== 'global') continue;
 
+        // Phase 1a-7: Safety fuse — check experimental facts and scope mismatch
+        if (isPromotionBlocked(rule, projectKey)) continue;
+        // Only check facts belonging to the current project
+        const allFacts = loadJsonFiles<MemoryFact>(join(HARNESS_DIR, 'memory/facts'))
+            .filter(f => f.project_key === projectKey);
+        if (isFactBasedPromotionBlocked(rule, projectKey, allFacts)) {
+            logger.info('improver', 'promotion blocked: is_experimental=true', {
+                rule_id: rule.id,
+            });
+            continue;
+        }
+
         // HARD로 승격
         rule.type = 'hard';
         rule.promoted_at = new Date().toISOString();
@@ -1217,7 +1592,7 @@ const MEMORY_KEYWORDS = [
     /FIXME:\s*(.+)/i,
 ];
 
-function indexSessionFacts(projectKey: string): void {
+function indexSessionFacts(projectKey: string, config?: HarnessConfig): void {
     const sessionDir = join(HARNESS_DIR, 'logs/sessions');
     if (!existsSync(sessionDir)) return;
 
@@ -1262,7 +1637,7 @@ function indexSessionFacts(projectKey: string): void {
         // 추출된 fact 저장
         for (const fact of extractedFacts) {
             const id = generateId();
-            const factData: MemoryFact = {
+            let factData: MemoryFact = {
                 id,
                 project_key: projectKey,
                 keywords: [...new Set(fact.keywords)], // 중복 제거
@@ -1272,6 +1647,12 @@ function indexSessionFacts(projectKey: string): void {
                 last_accessed_at: Date.now(),
                 access_count: 0,
             };
+            // Phase 1a-1: Enrich metadata if enabled
+            const idxSettings = getHarnessSettings(config);
+            factData = enrichFactMetadata(factData, {
+                rich_fact_metadata_enabled: idxSettings.rich_fact_metadata_enabled,
+                confidence_threshold_active: idxSettings.confidence_threshold_active,
+            });
             writeFileSync(join(factsDir, `${id}.json`), JSON.stringify(factData, null, 2));
             try {
                 appendUpperMemoryExtractShadow(projectKey, factData);
@@ -1343,11 +1724,12 @@ function getConsolidationShadowPath(projectKey: string): string {
     return join(HARNESS_DIR, `shadow/consolidation-shadow-${projectKey}.jsonl`);
 }
 
-function consolidateFacts(projectKey: string): void {
+function consolidateFacts(projectKey: string, config?: HarnessConfig): void {
     const factsDir = join(HARNESS_DIR, 'memory/facts');
     if (!existsSync(factsDir)) return;
 
-    const allFacts = loadJsonFiles<MemoryFact>(factsDir);
+    const allFacts = loadJsonFiles<MemoryFact>(factsDir)
+        .filter(f => f.project_key === projectKey);
     if (allFacts.length < 2) return;
 
     // Build similarity groups via union-find
@@ -1369,6 +1751,25 @@ function consolidateFacts(projectKey: string): void {
                 // store the first reason observed for this pair
                 const root = uf.find(a.id);
                 if (!reasons.has(root)) reasons.set(root, reason);
+            }
+
+            // Phase 1a-6: Contradiction surfacing
+            if (jaccardSimilar && getHarnessSettings(config).rich_fact_metadata_enabled) {
+                if (detectContradiction(a.content, b.content)) {
+                    // Mark both facts as needing verification
+                    const factsDir = join(HARNESS_DIR, 'memory/facts');
+                    for (const fact of [a, b]) {
+                        if (!fact.must_verify) {
+                            fact.must_verify = true;
+                            const factPath = join(factsDir, `${fact.id}.json`);
+                            if (existsSync(factPath)) {
+                                try {
+                                    writeFileSync(factPath, JSON.stringify({ ...fact, must_verify: true }, null, 2));
+                                } catch { /* non-fatal */ }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1414,6 +1815,11 @@ function consolidateFacts(projectKey: string): void {
             project_key: bestProjectKey,
             keywords: mergedKeywords,
             created_at: earliestCreatedAt,
+            // Phase 1a-6: inherit must_verify from any member
+            must_verify: group.some(f => f.must_verify) ? true : canonical.must_verify,
+            // Phase 1a: consolidated fact is inferred
+            origin_type: 'inferred' as const,
+            updated_at: new Date().toISOString(),
         };
 
         // Write canonical back
@@ -1461,7 +1867,8 @@ function relateFacts(projectKey: string): void {
     const factsDir = join(HARNESS_DIR, 'memory/facts');
     if (!existsSync(factsDir)) return;
 
-    const allFacts = loadJsonFiles<MemoryFact>(factsDir);
+    const allFacts = loadJsonFiles<MemoryFact>(factsDir)
+        .filter(f => f.project_key === projectKey);
     if (allFacts.length < 2) return;
 
     const relationsPath = join(HARNESS_DIR, 'memory/relations.jsonl');
@@ -1547,7 +1954,7 @@ export function trackFactAccess(facts: MemoryFact[]): void {
     }
 }
 
-export function markFactPruneCandidates(projectKey: string, ttlDays: number, extendThreshold: number): void {
+export function markFactPruneCandidates(projectKey: string, ttlDays: number, extendThreshold: number, config?: HarnessConfig): void {
     const factsDir = join(HARNESS_DIR, 'memory/facts');
     if (!existsSync(factsDir)) return;
 
@@ -1558,10 +1965,37 @@ export function markFactPruneCandidates(projectKey: string, ttlDays: number, ext
         if (fact.project_key !== projectKey) continue;
 
         const normalized = normalizeFactAccess(fact);
+
+        // Phase 1a-8: status-based cleanup
+        const richMetadata = getHarnessSettings(config).rich_fact_metadata_enabled;
+        if (richMetadata && fact.status) {
+            if (fact.status === 'superseded' || fact.status === 'deprecated') {
+                // Immediately archive regardless of TTL
+                const srcPath = join(factsDir, `${fact.id}.json`);
+                mkdirSync(join(HARNESS_DIR, 'memory/archive'), { recursive: true });
+                const dstPath = join(HARNESS_DIR, 'memory/archive', `${fact.id}.json`);
+                if (existsSync(srcPath)) {
+                    renameSync(srcPath, dstPath);
+                    logger.info('improver', 'fact archived by status', {
+                        fact_id: fact.id,
+                        status: fact.status,
+                    });
+                }
+                continue;
+            }
+        }
+
         const accessCount = normalized.access_count ?? 0;
+        let effectiveTtlDays = ttlDays;
+
+        // Phase 1a-8: unreviewed + low confidence → half TTL
+        if (richMetadata && fact.status === 'unreviewed' && (fact.confidence ?? 0.5) < 0.3) {
+            effectiveTtlDays = Math.max(1, Math.floor(ttlDays / 2));
+        }
+
         const effectiveTtlMs = accessCount >= extendThreshold
-            ? ttlDays * 2 * 24 * 60 * 60 * 1000
-            : ttlDays * 24 * 60 * 60 * 1000;
+            ? effectiveTtlDays * 2 * 24 * 60 * 60 * 1000
+            : effectiveTtlDays * 24 * 60 * 60 * 1000;
 
         const createdMs = parseIsoDate(fact.created_at);
         if (accessCount === 0 && (now - createdMs) >= effectiveTtlMs) {
@@ -1582,21 +2016,36 @@ export function markFactPruneCandidates(projectKey: string, ttlDays: number, ext
     }
 }
 
-export function formatFactLayer(fact: MemoryFact, layer: 1 | 2 | 3): string {
+export function formatFactLayer(fact: MemoryFact, layer: 1 | 2 | 3, boundaryHintEnabled = false, relatedCount = 0): string {
+    const mustVerifySuffix = fact.must_verify ? ' ⚠ 검증 필요' : '';
+    const hintSuffix = boundaryHintEnabled && relatedCount > 0 ? ` — 관련 기억 ${relatedCount}건 있음` : '';
+
     switch (layer) {
         case 1:
-            return `- [${fact.id.slice(0, 8)}] keywords: ${fact.keywords.join(', ')}`;
+            return `- [${fact.id.slice(0, 8)}] keywords: ${fact.keywords.join(', ')}${hintSuffix}${mustVerifySuffix}`;
         case 2: {
             const firstSentence = fact.content.split(/[.!?]\s/)[0] || fact.content;
-            return `- [${fact.id.slice(0, 8)}] ${fact.keywords.join(', ')} — ${firstSentence}`;
+            return `- [${fact.id.slice(0, 8)}] ${fact.keywords.join(', ')} — ${firstSentence}${hintSuffix}${mustVerifySuffix}`;
         }
         case 3:
-            return `- [${fact.source_session}] ${fact.content} (keywords: ${fact.keywords.join(', ')})`;
+            return `- [${fact.source_session}] ${fact.content} (keywords: ${fact.keywords.join(', ')})${mustVerifySuffix}`;
     }
 }
 
 function buildCompactionContext(projectKey: string, worktree: string, maxResults: number, semanticCompactingEnabled: boolean, config?: HarnessConfig): string[] {
     const parts: string[] = [];
+    const settings = getHarnessSettings(config);
+
+    // Phase 1a-3: Hot context injection (before scaffold)
+    if (settings.hot_context_enabled) {
+        const hotCtx = readHotContext(projectKey);
+        if (hotCtx) {
+            const formatted = formatHotContextForCompacting(hotCtx);
+            if (formatted.trim()) {
+                parts.push(formatted);
+            }
+        }
+    }
 
     // Scaffold 주입
     const scaffoldFiles = [
@@ -1621,7 +2070,11 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
 
     // SOFT 규칙 설명 주입 (scope:prompt의 유일한 강제 수단)
     const softRules = loadProjectRules('soft', projectKey);
-    const facts = loadJsonFiles<MemoryFact>(join(HARNESS_DIR, 'memory/facts'));
+    // Phase 1a: Scope facts to current project only
+    const allFacts = loadJsonFiles<MemoryFact>(join(HARNESS_DIR, 'memory/facts'));
+    const facts = allFacts.filter(f =>
+        f.project_key === projectKey || f.project_key === 'global'
+    );
 
     // Phase 3: Memory Search — 관련 fact 주입
     const queryText = [
@@ -1655,17 +2108,38 @@ function buildCompactionContext(projectKey: string, worktree: string, maxResults
     if (plan.applied_facts.length > 0) {
         if (semanticCompactingEnabled && plan.applied_facts.length > 2) {
             // 3-layer progressive disclosure
-            const ranked = plan.semantic_fact_candidates
+            let ranked = plan.semantic_fact_candidates
                 .filter(c => plan.applied_facts.some(f => f.id === c.fact.id));
+
+            // Phase 1a-4: Apply weighted ranking when rich metadata enabled
+            if (settings.rich_fact_metadata_enabled) {
+                const weighted = rankFactsWithWeights(ranked);
+                ranked = weighted.map(w => ({
+                    fact: w.fact,
+                    metadata_score: w.weighted_score,
+                    lexical_score: 0,
+                    reasons: [],
+                }));
+            }
 
             const total = ranked.length;
             const l3End = Math.max(1, Math.ceil(total * 0.3));
             const l2End = Math.min(total, l3End + Math.ceil(total * 0.4));
 
             const factLines: string[] = [];
+            const allAppliedFacts = plan.applied_facts;
+
             for (let i = 0; i < total; i++) {
                 const layer = i < l3End ? 3 : i < l2End ? 2 : 1;
-                factLines.push(formatFactLayer(ranked[i].fact, layer));
+                // Phase 1a-5: compute related count for boundary hints
+                const fact = ranked[i].fact;
+                const relatedCount = settings.boundary_hint_enabled
+                    ? allAppliedFacts.filter(f =>
+                        f.id !== fact.id &&
+                        f.keywords.some(k => fact.keywords.map(kk => kk.toLowerCase()).includes(k.toLowerCase()))
+                    ).length
+                    : 0;
+                factLines.push(formatFactLayer(ranked[i].fact, layer, settings.boundary_hint_enabled, relatedCount));
             }
             parts.push(`[HARNESS MEMORY — past decisions (layered)]\n${factLines.join('\n')}`);
         } else {
@@ -1691,6 +2165,8 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
         // event 훅: session.idle에서 L5+L6 처리
         event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
             if (event.type !== 'session.idle') return;
+
+            const sessionStartTime = Date.now();
 
             try {
                 // Loop 1: fix: 커밋 감지 → fix_commit signal 생성
@@ -1770,14 +2246,14 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
             // Phase 3: Memory Index — 세션에서 키워드 추출
             try {
-                indexSessionFacts(projectKey);
+                indexSessionFacts(projectKey, config);
             } catch (err) {
                 logger.error('improver', 'memory indexing failed', { error: err });
             }
 
             // Phase 3: Memory consolidation — merge duplicate facts
             try {
-                consolidateFacts(projectKey);
+                consolidateFacts(projectKey, config);
             } catch (err) {
                 logger.error('improver', 'fact consolidation failed', { error: err });
             }
@@ -1791,9 +2267,36 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
             // Token optimization: TTL-based fact pruning
             try {
-                markFactPruneCandidates(projectKey, settings.fact_ttl_days, settings.fact_ttl_extend_threshold);
+                markFactPruneCandidates(projectKey, settings.fact_ttl_days, settings.fact_ttl_extend_threshold, config);
             } catch (err) {
                 logger.error('improver', 'fact TTL pruning failed', { error: err });
+            }
+
+            // Phase 1a-2: Hot context auto-generation
+            let hotContextBuildMs = 0;
+            if (settings.hot_context_enabled) {
+                try {
+                    const hcStart = Date.now();
+                    const factsDir = join(HARNESS_DIR, 'memory/facts');
+                    const currentFacts = existsSync(factsDir) ? loadJsonFiles<MemoryFact>(factsDir) : [];
+                    // Scope to current project only
+                    const projectFacts = currentFacts.filter(f =>
+                        f.project_key === projectKey
+                    );
+                    const hotCtx = generateHotContext(projectKey, projectFacts);
+                    writeHotContext(projectKey, hotCtx);
+                    hotContextBuildMs = Date.now() - hcStart;
+                } catch (err) {
+                    logger.warn('improver', 'hot context generation failed', { error: err });
+                }
+            }
+
+            // Phase 1a-10: Memory metrics collection (always active)
+            try {
+                const metrics = collectMemoryMetrics(projectKey, sessionStartTime, hotContextBuildMs, 0);
+                appendMemoryMetrics(projectKey, metrics);
+            } catch (err) {
+                logger.warn('improver', 'memory metrics collection failed', { error: err });
             }
 
             // 프로젝트 상태 갱신
@@ -1802,10 +2305,17 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
 
         // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
         'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
+            const compactingStart = Date.now();
             const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results, settings.semantic_compacting_enabled, config);
             for (const part of parts) {
                 output.context.push(part);
             }
+            const compactingMs = Date.now() - compactingStart;
+            // Record compacting build time as a metrics entry
+            try {
+                const metrics = collectMemoryMetrics(projectKey, compactingStart, 0, compactingMs);
+                appendMemoryMetrics(projectKey, metrics);
+            } catch { /* non-fatal */ }
         },
     };
 };

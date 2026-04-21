@@ -9,12 +9,11 @@ src/
 ├── harness/                     # 하네스 레이어 (Step 1~2, 5f)
 │   ├── observer.ts              # L1 관측 + L2 신호 변환
 │   ├── enforcer.ts              # L4 HARD 차단 + SOFT 위반 추적
-│   ├── improver.ts              # L5 자가개선 + L6 폐루프 + Memory consolidate/relate + Fact TTL/접근추적 + 3계층 점진적 공개
+│   ├── improver.ts              # L5 자가개선 + L6 폐루프 + Memory consolidate/relate + Fact TTL/접근추적 + 3계층 점진적 공개 + Phase 1a (hot context, 메타데이터 분류, contradiction, boundary hint, 안전 퓨즈 확장, 메트릭)
 │   └── canary.ts                # metadata-based canary evaluation (낭비 탐지기 signal 포함)
 │
 ├── orchestrator/                # 오케스트레이션 레이어 (Step 4)
 │   ├── orchestrator.ts          # session.idle 기반 이벤트 처리
-│   ├── error-recovery.ts        # 에러 복구 5단계 에스컬레이션
 │   ├── qa-tracker.ts            # QA 시나리오별 실패 추적
 │   └── subagent-depth.ts        # 서브에이전트 깊이 추적 + 초과 차단
 │
@@ -40,7 +39,7 @@ src/
 │
 ├── config/                      # 설정 시스템
 │   ├── index.ts                 # 배럴 export
-│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings (낭시 탐지 임계값, Fact TTL 설정 포함)
+│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings (낭비 탐지 임계값, Fact TTL 설정, Phase 1a 메모리 의미론 토글 4개 포함)
 │   └── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
 │
 └── types.ts                     # 전체 타입 정의 (Signal, Rule, ProjectState 등)
