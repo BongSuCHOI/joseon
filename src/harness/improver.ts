@@ -74,11 +74,24 @@ function safeRegexTest(pattern: string, target: string): boolean {
 
 // #7: 과도하게 넓은 패턴 검증
 // 최소 3자, 메타문자만으로 구성된 패턴 거부
+/** OpenCode session ID: ses_ + 10+ hex chars — unique per session, never re-matches */
+const SESSION_ID_RE = /ses_[a-f0-9]{10,}/;
+
+/** Standard UUID: 8-4-4-4-12 hex — unique per entity, never re-matches */
+const UUID_RE = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
+
 function isValidPattern(pattern: string): boolean {
     if (!pattern || pattern.length < 3) return false;
     // 메타문자만 있는지 확인 (예: ".", ".*", ".+")
     const metaOnly = pattern.replace(/[.*+?^${}()|[\]\\]/g, '');
     if (metaOnly.length === 0) return false;
+
+    // Session-specific patterns — unique to one session, can never re-match
+    if (SESSION_ID_RE.test(pattern)) return false;
+
+    // UUID-containing patterns — unique identifiers, can never re-match
+    if (UUID_RE.test(pattern)) return false;
+
     return true;
 }
 
@@ -1444,10 +1457,20 @@ export function evaluateAckAcceptance(signal: Signal, _ackPath: string): AckAcce
 }
 
 function signalToRule(signal: Signal, worktree: string): void {
+    // fix_commit: unique commit messages are never reproducible as rules.
+    // Mistake pattern learning (mistake-pattern-candidates) handles these instead.
+    if (signal.type === 'fix_commit') {
+        appendHistory('rule_rejected', {
+            signal_id: signal.id,
+            reason: 'fix_commit_not_ruleable',
+        });
+        return;
+    }
+
     const pattern = signal.payload.pattern || signal.payload.description;
     if (!pattern) return;
 
-    const normalizedPattern = signal.type === 'fix_commit' ? escapeRegexLiteral(pattern) : pattern;
+    const normalizedPattern = pattern;
 
     // #7: 과도하게 넓은 패턴 거부
     if (!isValidPattern(normalizedPattern)) {

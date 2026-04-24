@@ -399,6 +399,8 @@ function isValidPattern(pattern: string): boolean {
     if (!pattern || pattern.length < 3) return false;
     const metaOnly = pattern.replace(/[.*+?^${}()|[\]\\]/g, '');
     if (metaOnly.length === 0) return false;
+    if (/ses_[a-f0-9]{10,}/.test(pattern)) return false;
+    if (/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(pattern)) return false;
     return true;
 }
 
@@ -420,6 +422,15 @@ assert(isValidPattern('()') === false, '메타문자만: "()" 거부');
 
 // 빈 문자열
 assert(isValidPattern('') === false, '빈 문자열 거부');
+
+// 세션 ID 포함 패턴
+assert(isValidPattern("Tool 'read' retried 3 times with errors in session ses_2517dfcc3ffe1Pd2S9BiWHk864") === false, '세션 ID 포함: 거부');
+assert(isValidPattern("ses_abc123def456") === false, '세션 ID만: 거부');
+assert(isValidPattern('normal error message ses_ short') === true, 'ses_ 짧은 건 허용');
+
+// UUID 포함 패턴
+assert(isValidPattern('Error processing 550e8400-e29b-41d4-a716-446655440000') === false, 'UUID 포함: 거부');
+assert(isValidPattern('no-uuid-here just dashes') === true, 'UUID 아닌 하이픈: 허용');
 
 // === #1: Race Condition 방지 (write 직전 재확인) ===
 console.log('\n=== #1: Race Condition 방지 ===');
