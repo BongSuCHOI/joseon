@@ -5,7 +5,7 @@
 
     "agents": {
         "orchestrator": {
-            "model": "openai/gpt-5.4-mini",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["*"],
@@ -13,7 +13,7 @@
             "hidden": false,
         },
         "reviewer": {
-            "model": "openai/gpt-5.4",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["requesting-code-review", "simplify", "web-design-guidelines"],
@@ -22,7 +22,7 @@
             "hidden": false,
         },
         "advisor": {
-            "model": "openai/gpt-5.4",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.1,
             "variant": "high",
             "skills": ["brainstorming", "systematic-debugging"],
@@ -63,7 +63,7 @@
             "hidden": false,
         },
         "designer": {
-            "model": "openai/gpt-5.4",
+            "model": "zai-coding-plan/glm-5.1",
             "temperature": 0.7,
             "variant": "medium",
             "skills": ["frontend-design", "ui-ux-pro-max", "excalidraw", "creative-ideation", "popular-web-designs", "agent-browser", "brainstorming"],
