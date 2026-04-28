@@ -21,6 +21,7 @@
 | 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 활성화 — .opencode/harness.jsonc에서 토글 ON) |
 | Token Opt. | 토큰 최적화 | Observer 낭비 탐지기(3개) + Memory Recall 3계층 공개 + Fact TTL/접근 추적 | ✅ 완료 |
 | Mem v3.2 Phase 1a | 파일 기반 의미론 | Promotion Control + Hot Context + Boundary Hint + Contradiction Surfacing + 안전 퓨즈 확장 + 메트릭 | ✅ 완료 (default-off, .opencode/harness.jsonc에서 4개 토글) |
+| Token Opt. v0 | 토큰 최적화 모듈 | pre_tool_guard + loop_budget + file_deduper + compact_override | ✅ 완료 (default-off, .opencode/harness.jsonc에서 token_optimizer_enabled로 활성화) |
 
 ---
 
@@ -66,6 +67,8 @@ Observer는 L1(관측)과 L2(신호 변환)를 담당하는 하네스의 첫 번
 **낭비 탐지기 (Token Optimization):**
 Observer의 `tool.execute.after` 훅에서 프록시 메트릭(툴 호출 횟수, 반복 패턴)을 기반으로 토큰 낭비 패턴을 감지한다. OpenCode API에서 실제 토큰 수를 알 수 없으므로 프록시 메트릭을 사용한다. 3개 탐지기 모두 인메모리 Map으로 세션별 추적하며, `session.created`/`session.deleted`에서 자동 초기화된다.
 
+**Token Optimizer v0 — loop_budget + file_deduper:** Observer의 `tool.execute.before` 훅에서 도구 유형별 세션 예산 초과 시 차단(loop_budget)과 같은 파일 반복 읽기 차단(file_deduper)을 수행한다. loop_budget은 5개 카테고리(search/read/test/write/other)별로 세션 전체 호출 수를 추적하여 한계 도달 시 `throw Error()`로 차단한다. file_deduper는 파일 읽기 3회까지는 카운트만 하고, 4회부터 `mtimeMs:size` 핑거프린트로 파일 변경 여부를 확인하여 변경 없으면 차단한다. 두 기능 모두 `token_optimizer_enabled` 마스터 토글이 켜져 있을 때만 동작한다.
+
 **세션 락:** `session.created`에서 PID 파일로 동일 프로젝트의 동시 세션을 차단한다.
 
 **서브에이전트 깊이 추적:** `SubagentDepthTracker`로 max depth 초과 시 차단한다.
@@ -81,6 +84,8 @@ Enforcer는 L4(HARD 차단)와 SOFT 위반 추적을 담당한다.
 **SOFT 위반 추적:** 위반 시 `violation_count`를 증가시킨다.
 
 **scope:prompt 규칙:** 위반 추적에서 제외되며, 승격 대상이 아니다.
+
+**Token Optimizer v0 — pre_tool_guard:** `token_optimizer_enabled` 마스터 토글이 켜져 있을 때, `tool.execute.before` 훅에서 위험 명령 패턴(cat, ls -R, find ., grep -R, docker logs, git log)을 매칭하여 `throw Error()`로 사전 차단한다. 에이전트에게 대안 명령을 제안하는 에러 메시지를 전달하며, 에이전트가 스스로 좁은 명령으로 재시도하도록 유도한다. `git log`는 세션당 1회까지만 허용한다.
 
 > **중요:** enforcer는 오직 L4 차단만 담당한다. L5 자가개선은 improver의 역할이다.
 
@@ -130,6 +135,7 @@ HARD 승격 (rules/hard/{id}.json)
   - Boundary hint는 `boundary_hint_enabled=true` 시 L1/L2 레이어에 포함
 - `scope:prompt` 규칙은 세션 시작부터 `.opencode/rules/`에 노출되어, compacting이 발동하지 않는 짧은 세션에서도 에이전트가 규칙을 인지
 - **Project-scoped 격리:** compacting은 현재 project_key와 일치하는 fact만 주입. 다른 프로젝트 fact와 legacy(빈 project_key) fact는 제외
+- **Token Optimizer v0 — compact_override:** `token_optimizer_enabled` + `compact_override_enabled`가 켜져 있을 때, `output.prompt`를 커스텀 컴팩션 프롬프트로 오버라이드한다. 이 프롬프트는 보존 우선순위(사용자 목표, 수정 파일, 설계 결정, 실패 기록)와 폐기 가능 항목(긴 로그, 중복 탐색, 확인된 파일 목록)을 명시하여 컴팩션 품질을 높인다. 기존 `output.context.push()` 로직은 그대로 유지된다.
 
 #### Memory Fact 접근 추적 및 TTL
 
@@ -332,6 +338,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 - **FallbackChain:** 모델 배열로 자동 폴백 지원
 - **Token 최적화 설정:** `tool_loop_threshold`(5), `retry_storm_threshold`(3), `excessive_read_threshold`(4), `fact_ttl_days`(30), `fact_ttl_extend_threshold`(5)
 - **Phase 1a 메모리 의미론:** `hot_context_enabled`(false), `rich_fact_metadata_enabled`(false), `confidence_threshold_active`(0.7), `boundary_hint_enabled`(false), `gate_a_monitoring_enabled`(false) — 모두 default-off
+- **Token Optimizer v0:** `token_optimizer_enabled`(false), `pre_tool_guard_enabled`(true), `loop_budget_enabled`(true), `file_deduper_enabled`(true), `compact_override_enabled`(true) — 마스터 토글 1개 + 기능별 토글 4개. 임계값은 모두 하드코딩
 
 ---
 

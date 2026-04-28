@@ -89,7 +89,7 @@ Smoke 테스트는 개별 실행:
 npx vitest run
 ```
 
-### Test Files (16개, 685 assertions)
+### Test Files (17개, 703 assertions)
 
 | 파일 | Assertions |
 |------|-----------|
@@ -109,6 +109,7 @@ npx vitest run
 | test/smoke-test-step3.ts | 50 |
 | test/smoke-test-step4.ts | 189 |
 | token-optimization.test.ts | 16 |
+| token-optimizer-v2.test.ts | 18 |
 
 ### Test History
 
@@ -122,6 +123,7 @@ npx vitest run
 | Simplify + consolidate/relate | readability + Phase 제거 + error-recovery 제거 + 메모리 병합/관계 | 564/564 |
 | Token Optimization | Observer 낭비 탐지기 + Fact TTL/접근추적 + 3계층 점근적 공개 | 580/580 |
 | Mem v3.2 Phase 1a | 파일 기반 의미론 (메타데이터 분류, hot context, contradiction, boundary hint, 안전 퓨즈, 메트릭) | 685/685 |
+| Token Optimizer v0 | pre_tool_guard + loop_budget + file_deduper + compact_override (tsc 통과 + 34/34 tests + E2E 실전 검증) | 703/703 |
 
 ---
 

@@ -385,3 +385,13 @@ export interface FactRelation {
     project_key: string;
     timestamp: string;
 }
+
+// ─── Token Optimizer v0 types ──────────────────────────
+
+export type ToolCategory = 'search' | 'read' | 'test' | 'write' | 'other';
+
+export interface DangerPattern {
+    regex: RegExp;
+    alternative: string;
+    label: string;
+}

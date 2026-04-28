@@ -1,10 +1,19 @@
 // src/harness/enforcer.ts — Plugin 2: L4 HARD 차단 + SOFT 위반 추적 + scaffold 차단
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import type { Rule } from '../types.js';
+import type { Rule, DangerPattern } from '../types.js';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, isPluginSource } from '../shared/index.js';
+import { DANGER_PATTERNS } from '../shared/constants.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
+
+// Session-scoped git log usage tracking: sessionID → used count
+const gitLogUsed = new Map<string, number>();
+
+// Reset helper — called from session.created event
+function resetSessionTracking(sessionID: string): void {
+    gitLogUsed.delete(sessionID);
+}
 
 function loadRules(type: 'soft' | 'hard', projectKey: string): Rule[] {
     const rules: Rule[] = [];
@@ -92,11 +101,15 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
 
     return {
         // 세션 시작 시 규칙 리로드
-        event: async ({ event }: { event: { type: string } }) => {
+        event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
             if (event.type === 'session.created') {
                 hardRules = loadRules('hard', projectKey);
                 softRules = loadRules('soft', projectKey);
                 scaffoldPatterns = loadScaffold(projectKey);
+            }
+            if (event.type === 'session.deleted') {
+                const sid = (event.properties?.sessionID as string) || '';
+                if (sid) resetSessionTracking(sid);
             }
         },
 
@@ -157,6 +170,19 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
                 }
             }
 
+            // === Token Optimizer: pre_tool_guard — large-output command blocking ===
+            if (settings.token_optimizer_enabled && settings.pre_tool_guard_enabled && input.tool === 'bash') {
+                const cmd = (output.args?.command as string) || '';
+                const danger = matchDangerPattern(cmd, input.sessionID);
+                if (danger) {
+                    throw new Error(
+                        `[TOKEN GUARD] "${danger.label}"은(는) 큰 출력을 만들 가능성이 높습니다.\n` +
+                        `대안: ${danger.alternative}\n` +
+                        `(이 차단은 .opencode/harness.jsonc에서 pre_tool_guard_enabled: false로 비활성화할 수 있습니다.)`,
+                    );
+                }
+            }
+
             // === 특수 차단: .env 파일 커밋 방지 ===
             if (input.tool === 'bash') {
                 const cmd = (output.args?.command as string) || '';
@@ -176,3 +202,25 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
         },
     };
 };
+
+// ─── Token Optimizer: pre_tool_guard helpers ────────────
+
+const GIT_LOG_REGEX = /\bgit\s+log\s*$/;
+
+/** Match a command against danger patterns. Returns the first match or null. */
+function matchDangerPattern(cmd: string, sessionID: string): (DangerPattern & { matched: string }) | null {
+    for (const pattern of DANGER_PATTERNS) {
+        if (pattern.regex.test(cmd)) {
+            // Special case: git log allowed once per session
+            if (GIT_LOG_REGEX.test(cmd)) {
+                const used = gitLogUsed.get(sessionID) ?? 0;
+                if (used === 0) {
+                    gitLogUsed.set(sessionID, 1);
+                    return null; // first call passes
+                }
+            }
+            return { ...pattern, matched: pattern.label };
+        }
+    }
+    return null;
+}

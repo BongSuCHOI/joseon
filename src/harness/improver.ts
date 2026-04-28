@@ -30,6 +30,7 @@ import type {
     FactRelation,
 } from '../types.js';
 import { HARNESS_DIR, THIRTY_DAYS_MS, ensureHarnessDirs, getProjectKey, generateId, rotateHistoryIfNeeded, logger, isPluginSource, appendJsonlRecord } from '../shared/index.js';
+import { COMPACT_OVERRIDE_PROMPT } from '../shared/constants.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import { evaluateCompactingCanary, readRecentCompactingShadowRecords, appendCompactingMismatchRecord } from './canary.js';
@@ -2489,7 +2490,12 @@ export const HarnessImprover = async (ctx: { worktree: string }, config?: Harnes
         },
 
         // compacting 훅: scaffold + 규칙 + memory 컨텍스트 주입
-        'experimental.session.compacting': async (_input: unknown, output: { context: string[] }) => {
+        'experimental.session.compacting': async (_input: unknown, output: { context: string[]; prompt?: string }) => {
+            // Token Optimizer v0: compact_override — custom compaction prompt
+            if (settings.token_optimizer_enabled && settings.compact_override_enabled) {
+                output.prompt = COMPACT_OVERRIDE_PROMPT;
+            }
+
             const compactingStart = Date.now();
             const parts = buildCompactionContext(projectKey, ctx.worktree, settings.search_max_results, settings.semantic_compacting_enabled, config);
             for (const part of parts) {

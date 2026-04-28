@@ -56,6 +56,7 @@
 | 6. Ack 조건 강화 | written/accepted 로그 + 3-check evaluator (5h) | guarded + passive-only |
 | 7. Cross-Project 자동 승격 | exact-match candidate aggregation | guarded-off |
 | 8. auto-update-checker | 완료 — warn-only + 24h 쿨다운 | default-off |
+| Token Opt. v0 | 토큰 최적화 모듈 | pre_tool_guard(큰 출력 차단) + loop_budget(카테고리별 예산) + file_deduper(중복 읽기 차단) + compact_override(컴팩션 프롬프트) | 활성 (token_optimizer_enabled=true 시, .opencode/harness.jsonc에서 5개 토글로 제어) |
 
 ---
 

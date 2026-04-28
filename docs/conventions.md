@@ -35,14 +35,14 @@ src/
 │   ├── index.ts                 # 배럴 export
 │   ├── utils.ts                 # getProjectKey, ensureHarnessDirs, generateId, parseList, mergeEventHandlers, rotateHistoryIfNeeded, isPluginSource, readJsonFile, readJsonlFile, safeErrorMessage
 │   ├── logger.ts                # 4레벨 로깅 (debug/info/warn/error + HARNESS_LOG_LEVEL)
-│   └── constants.ts             # HARNESS_DIR, HOME, THIRTY_DAYS_MS, MAX_ERROR_SUMMARY_LENGTH
+│   └── constants.ts             # HARNESS_DIR, HOME, THIRTY_DAYS_MS, MAX_ERROR_SUMMARY_LENGTH + Token Optimizer v0 (BUDGET_LIMITS, DANGER_PATTERNS, COMPACT_OVERRIDE_PROMPT, FILE_DEDUPER_THRESHOLD)
 │
 ├── config/                      # 설정 시스템
 │   ├── index.ts                 # 배럴 export
-│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings (낭비 탐지 임계값, Fact TTL 설정, Phase 1a 메모리 의미론 토글 4개 포함)
+│   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings (낭비 탐지 임계값, Fact TTL 설정, Phase 1a 메모리 의미론 토글 5개, Token Optimizer v0 토글 5개 포함)
 │   └── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
 │
-└── types.ts                     # 전체 타입 정의 (Signal, Rule, ProjectState 등)
+└── types.ts                     # 전체 타입 정의 (Signal, Rule, ProjectState, ToolCategory, DangerPattern 등)
 ```
 
 ## Coding Rules

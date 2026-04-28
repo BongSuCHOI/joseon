@@ -49,6 +49,12 @@ export interface HarnessSettings {
     confidence_threshold_active?: number;
     boundary_hint_enabled?: boolean;
     gate_a_monitoring_enabled?: boolean;
+    // Token Optimizer v0 settings (all default-off at master level)
+    token_optimizer_enabled?: boolean;       // master toggle (default: false)
+    pre_tool_guard_enabled?: boolean;        // block large-output commands (default: true when master on)
+    loop_budget_enabled?: boolean;           // per-category session budget (default: true when master on)
+    file_deduper_enabled?: boolean;          // block repeated unchanged-file reads (default: true when master on)
+    compact_override_enabled?: boolean;      // custom compaction prompt (default: true when master on)
 }
 
 export interface HarnessConfig {
@@ -85,6 +91,12 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     confidence_threshold_active: 0.7,
     boundary_hint_enabled: false,
     gate_a_monitoring_enabled: false,
+    // Token Optimizer v0 defaults
+    token_optimizer_enabled: false,
+    pre_tool_guard_enabled: true,
+    loop_budget_enabled: true,
+    file_deduper_enabled: true,
+    compact_override_enabled: true,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

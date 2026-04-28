@@ -122,6 +122,9 @@
         "confidence_threshold_active": 0.7, // active vs unreviewed 분기 임계값
         "boundary_hint_enabled": true, // compacting L1/L2 관련 기억 힌트 표시
         "gate_a_monitoring_enabled": true, // Gate A 자동 평가 + status/alert 기록 + compacting advisory
+
+        // ─── Token Optimizer v0 (2026-04-29) ───
+        "token_optimizer_enabled": true, // 마스터 토글: 큰 출력 차단 + 루프 예산 + 파일 중복 + 컴팩션 커스텀
     },
 
     // FallbackChain — 다중 모델 환경에서 rate limit 시 자동 전환

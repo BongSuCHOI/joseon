@@ -1,9 +1,11 @@
 // src/harness/observer.ts — Plugin 1: L1 observation + L2 signal conversion
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, logger, appendJsonlRecord } from '../shared/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import type { HarnessConfig } from '../config/index.js';
+import { BUDGET_LIMITS, FILE_DEDUPER_THRESHOLD } from '../shared/constants.js';
+import type { ToolCategory } from '../types.js';
 import { SubagentDepthTracker } from '../orchestrator/subagent-depth.js';
 import { runCanaryEvaluation } from './canary.js';
 import type { Signal, ShadowDecisionRecord } from '../types.js';
@@ -172,8 +174,78 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
     const toolCallCounts = new Map<string, number>();       // key: `${sessionID}::${tool}::${argsFingerprint}`
     const retryCycles = new Map<string, number>();            // key: `${sessionID}::${tool}`
     const fileReadCounts = new Map<string, number>();         // key: `${sessionID}::${filePath}`
+    // Token Optimizer v0 maps
+    const toolBudgetCounts = new Map<string, number>();       // key: `${sessionID}::budget::${category}`
+    const fileFingerprints = new Map<string, string>();       // key: `${sessionID}::${filePath}`, value: mtimeMs:size
 
     return {
+        // ─── Token Optimizer v0: tool.execute.before ──────
+        // loop_budget + file_deduper (pre-blocking, throw Error to block)
+        'tool.execute.before': async (input: { tool: string; sessionID: string; callID: string }, output: { args: Record<string, unknown> }) => {
+            const settings = getHarnessSettings(ctx.config);
+            if (!settings.token_optimizer_enabled) return;
+
+            // === loop_budget: per-category session budget ===
+            if (settings.loop_budget_enabled) {
+                const category = classifyToolCall(input.tool, output.args);
+                const budgetKey = `${input.sessionID}::budget::${category}`;
+                const current = toolBudgetCounts.get(budgetKey) ?? 0;
+                const limit = BUDGET_LIMITS[category];
+
+                if (current >= limit) {
+                    throw new Error(
+                        `[LOOP BUDGET] 이 세션에서 ${category} 도구를 ${current}회 호출했습니다 (한계: ${limit}).\n` +
+                        `지금까지 얻은 정보로 가설을 세우세요.\n` +
+                        `필요한 경우 사용자에게 선택지를 제시하세요.`,
+                    );
+                }
+
+                toolBudgetCounts.set(budgetKey, current + 1);
+            }
+
+            // === file_deduper: block repeated unchanged-file reads ===
+            if (settings.file_deduper_enabled) {
+                const filePath = extractFilePath(input.tool, output.args);
+                if (filePath && isReadTool(input.tool, output.args)) {
+                    const deduperKey = `${input.sessionID}::${filePath}`;
+                    const currentCount = fileReadCounts.get(deduperKey) ?? 0;
+
+                    // Below threshold: just count, no stat call
+                    if (currentCount < FILE_DEDUPER_THRESHOLD) {
+                        fileReadCounts.set(deduperKey, currentCount + 1);
+                    } else {
+                        // At or above threshold: check mtime + size
+                        try {
+                            const stat = statSync(filePath);
+                            const fingerprint = `${stat.mtimeMs}:${stat.size}`;
+                            const prevFingerprint = fileFingerprints.get(deduperKey);
+
+                            // File changed → reset counter, allow
+                            if (prevFingerprint && prevFingerprint !== fingerprint) {
+                                fileReadCounts.set(deduperKey, 1);
+                                fileFingerprints.set(deduperKey, fingerprint);
+                                return;
+                            }
+
+                            // File unchanged → block
+                            fileFingerprints.set(deduperKey, fingerprint);
+                            fileReadCounts.set(deduperKey, currentCount + 1);
+
+                            throw new Error(
+                                `[FILE DEDUPER] "${filePath}"를 이미 ${currentCount}회 읽었습니다 (변경 없음).\n` +
+                                `파일이 수정되지 않았습니다. 기존 정보를 활용하세요.\n` +
+                                `특정 함수나 줄 범위만 필요하면 offset/limit을 지정하세요.`,
+                            );
+                        } catch (e) {
+                            // Re-throw our own errors
+                            if (e instanceof Error && e.message.startsWith('[FILE DEDUPER]')) throw e;
+                            // stat failed (file deleted, etc.) → allow
+                        }
+                    }
+                }
+            }
+        },
+
         'tool.execute.after': async (input: { tool: string; sessionID: string; callID: string; args: unknown }, output?: { title?: string; output?: string }) => {
             logger.info('observer', 'tool executed', {
                 tool: input.tool,
@@ -267,6 +339,12 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 for (const key of [...fileReadCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
                     fileReadCounts.delete(key);
                 }
+                for (const key of [...toolBudgetCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                    toolBudgetCounts.delete(key);
+                }
+                for (const key of [...fileFingerprints.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                    fileFingerprints.delete(key);
+                }
             }
 
             if (event.type === 'session.updated') {
@@ -297,6 +375,12 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                     }
                     for (const key of [...fileReadCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
                         fileReadCounts.delete(key);
+                    }
+                    for (const key of [...toolBudgetCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                        toolBudgetCounts.delete(key);
+                    }
+                    for (const key of [...fileFingerprints.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
+                        fileFingerprints.delete(key);
                     }
                 }
             }
@@ -367,3 +451,42 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
         },
     };
 };
+
+// ─── Token Optimizer v0: helper functions ───────────────
+
+function classifyToolCall(tool: string, args: Record<string, unknown>): ToolCategory {
+    if (tool === 'read') return 'read';
+    if (tool === 'write' || tool === 'edit') return 'write';
+    if (tool === 'bash') {
+        const cmd = (args.command as string) ?? '';
+        if (/\b(npm test|vitest|jest|pytest)\b/.test(cmd)) return 'test';
+        if (/\b(grep|rg|find|glob|ag|ack)\b/.test(cmd)) return 'search';
+        if (/\b(cat|head|tail|less|more)\b/.test(cmd)) return 'read';
+        if (/\b(write|patch|sed|awk)\b/.test(cmd)) return 'write';
+    }
+    return 'other';
+}
+
+function isReadTool(tool: string, args: Record<string, unknown>): boolean {
+    if (tool === 'read') return true;
+    if (tool === 'bash') {
+        const cmd = (args.command as string) ?? '';
+        return /\b(cat|head|tail|less|more)\b/.test(cmd);
+    }
+    return false;
+}
+
+function extractFilePath(tool: string, args: Record<string, unknown>): string | null {
+    // Direct read tool
+    if (tool === 'read') {
+        return (args.filePath as string) || (args.path as string) || null;
+    }
+    // Bash commands with file arguments
+    if (tool === 'bash') {
+        const cmd = (args.command as string) ?? '';
+        // Match cat/head/tail <file>
+        const match = cmd.match(/(?:cat|head|tail(?:\s+-\d+)?)\s+(?:-\S+\s+)*["']?([^"'\s]+)["']?/);
+        if (match) return match[1];
+    }
+    return null;
+}
