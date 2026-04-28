@@ -27,7 +27,8 @@ src/
 │   ├── observer.ts           # L1 관측 + L2 신호 변환
 │   ├── enforcer.ts           # L4 HARD 차단 + SOFT 위반 추적
 │   ├── improver.ts           # L5 자가개선 + L6 폐루프
-│   └── canary.ts             # canary 평가 (shadow + mismatch)
+│   ├── canary.ts             # canary 평가 (shadow + mismatch)
+│   └── token-metrics-tracker.ts # v0.5 세션 메트릭 수집 + 권장 엔진
 ├── orchestrator/             # 오케스트레이션 레이어
 │   ├── orchestrator.ts       # 최상위 라우터 (qa-tracker wiring + agent_id)
 │   ├── qa-tracker.ts         # QA 실패 추적

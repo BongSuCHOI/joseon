@@ -140,6 +140,7 @@ SOFT 규칙 생성 (rules/soft/)
 │   │   ├── memory/
 │   │   │   ├── hot-context.json      # Phase 1a: 세션 간 컨텍스트 캐시
 │   │   │   ├── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭
+│   │   │   ├── token-optimizer-metrics.jsonl # Token Optimizer v0.5: 세션 메트릭 수집
 │   │   │   ├── gate-a-status.json    # Gate A 자동 평가 상태
 │   │   │   └── gate-a-alerts.jsonl   # Gate A 1회성 알림 로그
 │   │   ├── foreground-fallback.json # 세션별 폴백 상태
@@ -252,7 +253,7 @@ Phase 1a 기능은 모두 default-off다. `.opencode/harness.jsonc`에서 개별
 ```
 src/
 ├── index.ts                     # 플러그인 진입점 (loadConfig + createAllHooks + 4개 플러그인 병합 + config 콜백)
-├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate, ConsolidationRecord, FactRelation + Phase 1a(FactOriginType, FactStatus, HotContext, MemoryMetricRecord) 타입 정의
+├── types.ts                     # Signal, Rule, ProjectState, QAFailures, EvalResult, MistakePatternCandidate, ConsolidationRecord, FactRelation + Phase 1a(FactOriginType, FactStatus, HotContext, MemoryMetricRecord) + TokenOptimizerMetricsRecord 타입 정의
 ├── config/                      # A2: 설정 시스템
 │   ├── schema.ts                # HarnessConfig, AgentOverrideConfig, HarnessSettings + defaults
 │   ├── loader.ts                # JSONC/JSON 로더 + 글로벌/프로젝트 병합
@@ -275,7 +276,8 @@ src/
 │   ├── observer.ts              # Plugin 1: L1 관측 + L2 신호 변환 + PID 세션 락
 │   ├── enforcer.ts              # Plugin 2: L4 HARD 차단 + SOFT 위반 추적
 │   ├── improver.ts              # Plugin 3: L5 자가개선 + L6 폐루프 + Memory consolidate/relate + Phase 1a(hot context, promotion control, boundary hint, contradiction, 안전 퓨즈, memory metrics)
-│   └── canary.ts                # Step 5f/5g: metadata-based phase/signal + compacting canary evaluation
+│   ├── canary.ts                # Step 5f/5g: metadata-based phase/signal + compacting canary evaluation
+│   └── token-metrics-tracker.ts # Token Optimizer v0.5 세션 메트릭 수집 + 권장 엔진
 ├── orchestrator/
 │   ├── orchestrator.ts          # Plugin 4: qa-tracker wiring + agent_id injection (Step 4D~4f)
 │   ├── qa-tracker.ts            # QA 시나리오별 실패 추적 (Step 4c)

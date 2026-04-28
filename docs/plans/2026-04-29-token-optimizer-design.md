@@ -421,6 +421,15 @@ pre_tool_guard_enabled?: boolean;        // 큰 출력 명령 사전 차단 (def
 loop_budget_enabled?: boolean;           // 도구 유형별 예산 차단 (default: true)
 file_deduper_enabled?: boolean;          // 같은 파일 반복 읽기 차단 (default: true)
 compact_override_enabled?: boolean;      // 컴팩션 프롬프트 커스텀 (default: true)
+
+// Token Optimizer v1: configurable thresholds
+budget_limits_search?: number;           // default: 20
+budget_limits_read?: number;            // default: 30
+budget_limits_test?: number;            // default: 10
+budget_limits_write?: number;            // default: 20
+budget_limits_other?: number;           // default: 50
+file_deduper_threshold?: number;        // default: 3
+git_log_session_limit?: number;         // default: 1
 ```
 
 **v0 원칙:** 마스터 토글 1개 + 기능별 토글 4개 = 총 5개. 임계값은 모두 하드코딩.
@@ -444,17 +453,18 @@ compact_override_enabled: true,
 ```
 src/
 ├── harness/
-│   ├── observer.ts           # ← 수정: loop_budget 카테고리 분류 + file_deduper mtime/size 지문 추적
-│   ├── enforcer.ts           # ← 수정: pre_tool_guard 위험 명령 패턴 매칭
-│   └── improver.ts           # ← 수정: compact_override prompt 오버라이드
-├── types.ts                  # ← 수정: ToolCategory, DangerPattern 타입 추가
+│   ├── observer.ts                # ← 수정: loop_budget 카테고리 분류 + file_deduper mtime/size 지문 추적
+│   ├── enforcer.ts                # ← 수정: pre_tool_guard 위험 명령 패턴 매칭
+│   ├── improver.ts                # ← 수정: compact_override prompt 오버라이드
+│   └── token-metrics-tracker.ts   # ← 신규: v0.5 메트릭 수집 + 권장 엔진
+├── types.ts                       # ← 수정: ToolCategory, DangerPattern 타입 추가
 ├── config/
-│   └── schema.ts             # ← 수정: token_optimizer 설정 5개 추가
+│   └── schema.ts                  # ← 수정: token_optimizer 설정 5개 + v1 임계값 7개 추가
 └── shared/
-    └── constants.ts          # ← 수정: 위험 명령 패턴 테이블 + 컴팩션 프롬프트 + 예산 한계 상수 추가
+    └── constants.ts               # ← 수정: 위험 명령 패턴 테이블 + 컴팩션 프롬프트 + 예산 한계 상수 추가
 ```
 
-**새 파일 없음. 수정 파일 6개.**
+**신규 파일 1개. 수정 파일 6개.**
 
 ---
 
@@ -656,3 +666,15 @@ v0.5 지표를 2주간 수집 후 다음 기준으로 v1 기능을 결정한다:
 | Runtime dependencies | 0 |
 | Tests | 34/34 passed (18 new + 16 existing) |
 | E2E verification | cat blocked, git log blocked (2nd call), tail passed, agent auto-selected alternatives |
+
+### v0.5→v1 구현 결과 (2026-04-29)
+
+| 항목 | 내용 |
+|------|------|
+| Date | 2026-04-29 |
+| Status | 구현 완료 |
+| New files | 1 (token-metrics-tracker.ts) |
+| Modified files | 5 (types.ts, constants.ts, schema.ts, enforcer.ts, observer.ts) |
+| Features | 메트릭 수집 (4개 지표), 권장 엔진 (3-세션 규칙), 임계값 설정화 (7개 설정) |
+| Tests | 34/34 passed (기존 테스트 회귀 없음) |
+| E2E | cat blocked, tail passed, git log configurable limit, metrics JSONL write verified |

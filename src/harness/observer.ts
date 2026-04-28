@@ -1,14 +1,15 @@
 // src/harness/observer.ts — Plugin 1: L1 observation + L2 signal conversion
 import { writeFileSync, readFileSync, unlinkSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
-import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, logger, appendJsonlRecord } from '../shared/index.js';
+import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, generateId, logger, appendJsonlRecord, rotateHistoryIfNeeded, readJsonlFile } from '../shared/index.js';
 import { getHarnessSettings } from '../config/index.js';
 import type { HarnessConfig } from '../config/index.js';
-import { BUDGET_LIMITS, FILE_DEDUPER_THRESHOLD } from '../shared/constants.js';
-import type { ToolCategory } from '../types.js';
+import { BUDGET_LIMITS, FILE_DEDUPER_THRESHOLD, TOKEN_OPTIMIZER_METRICS_FILE, METRICS_MAX_BYTES, METRICS_RECOMMENDATION_WINDOW } from '../shared/constants.js';
+import type { ToolCategory, TokenOptimizerMetricsRecord } from '../types.js';
 import { SubagentDepthTracker } from '../orchestrator/subagent-depth.js';
 import { runCanaryEvaluation } from './canary.js';
 import type { Signal, ShadowDecisionRecord } from '../types.js';
+import { recordBlock, recordPass, recordBudgetUsage, collectAndClear, clearSession as clearMetricsSession, analyzeAndRecommend } from './token-metrics-tracker.js';
 
 // --- File-level constants ---
 const MAX_ERROR_MESSAGE_LENGTH = 200;
@@ -190,9 +191,13 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 const category = classifyToolCall(input.tool, output.args);
                 const budgetKey = `${input.sessionID}::budget::${category}`;
                 const current = toolBudgetCounts.get(budgetKey) ?? 0;
-                const limit = BUDGET_LIMITS[category];
+                const limit = getBudgetLimit(settings, category);
+
+                // Track budget usage for metrics (before increment)
+                recordBudgetUsage(input.sessionID, category, current + 1, limit);
 
                 if (current >= limit) {
+                    recordBlock(input.sessionID, 'loop_budget', category);
                     throw new Error(
                         `[LOOP BUDGET] 이 세션에서 ${category} 도구를 ${current}회 호출했습니다 (한계: ${limit}).\n` +
                         `지금까지 얻은 정보로 가설을 세우세요.\n` +
@@ -200,6 +205,7 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                     );
                 }
 
+                recordPass(input.sessionID, 'loop_budget', category);
                 toolBudgetCounts.set(budgetKey, current + 1);
             }
 
@@ -209,10 +215,12 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 if (filePath && isReadTool(input.tool, output.args)) {
                     const deduperKey = `${input.sessionID}::${filePath}`;
                     const currentCount = fileReadCounts.get(deduperKey) ?? 0;
+                    const deduperThreshold = settings.file_deduper_threshold;
 
                     // Below threshold: just count, no stat call
-                    if (currentCount < FILE_DEDUPER_THRESHOLD) {
+                    if (currentCount < deduperThreshold) {
                         fileReadCounts.set(deduperKey, currentCount + 1);
+                        recordPass(input.sessionID, 'file_deduper');
                     } else {
                         // At or above threshold: check mtime + size
                         try {
@@ -224,12 +232,14 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                             if (prevFingerprint && prevFingerprint !== fingerprint) {
                                 fileReadCounts.set(deduperKey, 1);
                                 fileFingerprints.set(deduperKey, fingerprint);
+                                recordPass(input.sessionID, 'file_deduper');
                                 return;
                             }
 
                             // File unchanged → block
                             fileFingerprints.set(deduperKey, fingerprint);
                             fileReadCounts.set(deduperKey, currentCount + 1);
+                            recordBlock(input.sessionID, 'file_deduper');
 
                             throw new Error(
                                 `[FILE DEDUPER] "${filePath}"를 이미 ${currentCount}회 읽었습니다 (변경 없음).\n` +
@@ -329,6 +339,7 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 const sessionID = getProp<string>(event, 'sessionID') || 'unknown';
                 persistSessionStart(projectKey, sessionID);
                 acquireSessionLock(projectKey);
+                clearMetricsSession(sessionID);
                 // Clear tracking maps for this session
                 for (const key of [...toolCallCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
                     toolCallCounts.delete(key);
@@ -366,6 +377,7 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
                 const sessionID = getProp<string>(event, 'sessionID');
                 if (sessionID) {
                     depthTracker.cleanup(sessionID);
+                    clearMetricsSession(sessionID);
                     // Clear tracking maps for this session
                     for (const key of [...toolCallCounts.keys()].filter(k => k.startsWith(`${sessionID}::`))) {
                         toolCallCounts.delete(key);
@@ -386,10 +398,71 @@ export const HarnessObserver = async (ctx: { worktree: string; config?: HarnessC
             }
 
             if (event.type === 'session.idle') {
+                const sessionID = getProp<string>(event, 'sessionID') || 'unknown';
                 logger.info('observer', 'session_idle', {
                     event: 'session_idle',
-                    sessionID: getProp<string>(event, 'sessionID'),
+                    sessionID,
                 });
+
+                // === Token Optimizer v0.5: collect and persist session metrics ===
+                const metrics = collectAndClear(sessionID);
+                if (metrics) {
+                    try {
+                        const totalBlocks = metrics.totalBlocks;
+                        const totalCalls = totalBlocks +
+                            metrics.passes.pre_tool_guard +
+                            metrics.passes.loop_budget +
+                            metrics.passes.file_deduper;
+
+                        const record: TokenOptimizerMetricsRecord = {
+                            ts: new Date().toISOString(),
+                            session_id: sessionID,
+                            project_key: projectKey,
+                            pre_tool_guard_blocks: metrics.blocks.pre_tool_guard,
+                            pre_tool_guard_passes: metrics.passes.pre_tool_guard,
+                            loop_budget_blocks: metrics.blocks.loop_budget,
+                            loop_budget_passes: metrics.passes.loop_budget,
+                            file_deduper_blocks: metrics.blocks.file_deduper,
+                            file_deduper_passes: metrics.passes.file_deduper,
+                            budget_usage: metrics.budgetUsage,
+                            budget_exhaustions: metrics.budgetExhaustions,
+                            block_rate: totalCalls > 0 ? totalBlocks / totalCalls : 0,
+                            retry_after_block_rate: totalBlocks > 0 ? metrics.retriesAfterBlock / totalBlocks : 0,
+                        };
+
+                        const metricsDir = join(HARNESS_DIR, 'projects', projectKey, 'memory');
+                        const metricsPath = join(metricsDir, TOKEN_OPTIMIZER_METRICS_FILE);
+                        rotateHistoryIfNeeded(metricsPath, METRICS_MAX_BYTES);
+                        appendJsonlRecord(metricsPath, record as unknown as Record<string, unknown>);
+
+                        // === v0.5: analyze recent sessions and produce recommendations ===
+                        const recentMetrics = readJsonlFile<TokenOptimizerMetricsRecord>(metricsPath)
+                            .slice(-METRICS_RECOMMENDATION_WINDOW);
+                        const effectiveLimits: Record<ToolCategory, number> = {
+                            search: harnessSettings.budget_limits_search,
+                            read: harnessSettings.budget_limits_read,
+                            test: harnessSettings.budget_limits_test,
+                            write: harnessSettings.budget_limits_write,
+                            other: harnessSettings.budget_limits_other,
+                        };
+                        const recommendations = analyzeAndRecommend(recentMetrics, effectiveLimits, harnessSettings.file_deduper_threshold);
+                        for (const rec of recommendations) {
+                            logger.info('token-optimizer', 'recommendation', {
+                                type: rec.type,
+                                feature: rec.feature,
+                                category: rec.category,
+                                severity: rec.severity,
+                                message: rec.message,
+                            });
+                        }
+                    } catch (e) {
+                        logger.warn('observer', 'metrics_persist_failed', {
+                            sessionID,
+                            error: e instanceof Error ? e.message : String(e),
+                        });
+                    }
+                }
+
                 releaseSessionLock(projectKey);
             }
 
@@ -489,4 +562,16 @@ function extractFilePath(tool: string, args: Record<string, unknown>): string | 
         if (match) return match[1];
     }
     return null;
+}
+
+/** Resolve budget limit for a category from settings, falling back to BUDGET_LIMITS defaults */
+function getBudgetLimit(settings: Required<import('../config/schema.js').HarnessSettings>, category: ToolCategory): number {
+    const mapping: Record<ToolCategory, keyof typeof settings> = {
+        search: 'budget_limits_search',
+        read: 'budget_limits_read',
+        test: 'budget_limits_test',
+        write: 'budget_limits_write',
+        other: 'budget_limits_other',
+    };
+    return settings[mapping[category]] as number;
 }

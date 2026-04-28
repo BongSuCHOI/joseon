@@ -55,6 +55,14 @@ export interface HarnessSettings {
     loop_budget_enabled?: boolean;           // per-category session budget (default: true when master on)
     file_deduper_enabled?: boolean;          // block repeated unchanged-file reads (default: true when master on)
     compact_override_enabled?: boolean;      // custom compaction prompt (default: true when master on)
+    // Token Optimizer v1: configurable thresholds (override hardcoded defaults)
+    budget_limits_search?: number;           // default: 20
+    budget_limits_read?: number;            // default: 30
+    budget_limits_test?: number;            // default: 10
+    budget_limits_write?: number;           // default: 20
+    budget_limits_other?: number;           // default: 50
+    file_deduper_threshold?: number;        // default: 3
+    git_log_session_limit?: number;         // default: 1 (times git log allowed per session)
 }
 
 export interface HarnessConfig {
@@ -97,6 +105,14 @@ export const DEFAULT_HARNESS_SETTINGS: Required<HarnessSettings> = {
     loop_budget_enabled: true,
     file_deduper_enabled: true,
     compact_override_enabled: true,
+    // Token Optimizer v1: configurable thresholds
+    budget_limits_search: 20,
+    budget_limits_read: 30,
+    budget_limits_test: 10,
+    budget_limits_write: 20,
+    budget_limits_other: 50,
+    file_deduper_threshold: 3,
+    git_log_session_limit: 1,
 };
 
 export function getHarnessSettings(config?: HarnessConfig): Required<HarnessSettings> {

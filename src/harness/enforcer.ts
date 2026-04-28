@@ -6,6 +6,7 @@ import { HARNESS_DIR, ensureHarnessDirs, getProjectKey, isPluginSource } from '.
 import { DANGER_PATTERNS } from '../shared/constants.js';
 import type { HarnessConfig } from '../config/index.js';
 import { getHarnessSettings } from '../config/index.js';
+import { recordBlock, recordPass } from './token-metrics-tracker.js';
 
 // Session-scoped git log usage tracking: sessionID → used count
 const gitLogUsed = new Map<string, number>();
@@ -173,13 +174,17 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
             // === Token Optimizer: pre_tool_guard — large-output command blocking ===
             if (settings.token_optimizer_enabled && settings.pre_tool_guard_enabled && input.tool === 'bash') {
                 const cmd = (output.args?.command as string) || '';
-                const danger = matchDangerPattern(cmd, input.sessionID);
+                const danger = matchDangerPattern(cmd, input.sessionID, settings.git_log_session_limit);
                 if (danger) {
+                    recordBlock(input.sessionID, 'pre_tool_guard');
                     throw new Error(
                         `[TOKEN GUARD] "${danger.label}"은(는) 큰 출력을 만들 가능성이 높습니다.\n` +
                         `대안: ${danger.alternative}\n` +
                         `(이 차단은 .opencode/harness.jsonc에서 pre_tool_guard_enabled: false로 비활성화할 수 있습니다.)`,
                     );
+                } else if (input.tool === 'bash' && cmd.length > 0) {
+                    // Bash command passed the guard — record as pass
+                    recordPass(input.sessionID, 'pre_tool_guard');
                 }
             }
 
@@ -208,15 +213,15 @@ export const HarnessEnforcer = async (ctx: { worktree: string }, config?: Harnes
 const GIT_LOG_REGEX = /\bgit\s+log\s*$/;
 
 /** Match a command against danger patterns. Returns the first match or null. */
-function matchDangerPattern(cmd: string, sessionID: string): (DangerPattern & { matched: string }) | null {
+function matchDangerPattern(cmd: string, sessionID: string, gitLogLimit: number): (DangerPattern & { matched: string }) | null {
     for (const pattern of DANGER_PATTERNS) {
         if (pattern.regex.test(cmd)) {
-            // Special case: git log allowed once per session
+            // Special case: git log allowed N times per session
             if (GIT_LOG_REGEX.test(cmd)) {
                 const used = gitLogUsed.get(sessionID) ?? 0;
-                if (used === 0) {
-                    gitLogUsed.set(sessionID, 1);
-                    return null; // first call passes
+                if (used < gitLogLimit) {
+                    gitLogUsed.set(sessionID, used + 1);
+                    return null; // within limit, passes
                 }
             }
             return { ...pattern, matched: pattern.label };

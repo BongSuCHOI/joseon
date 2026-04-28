@@ -56,7 +56,7 @@
 | 6. Ack 조건 강화 | written/accepted 로그 + 3-check evaluator (5h) | guarded + passive-only |
 | 7. Cross-Project 자동 승격 | exact-match candidate aggregation | guarded-off |
 | 8. auto-update-checker | 완료 — warn-only + 24h 쿨다운 | default-off |
-| Token Opt. v0 | 토큰 최적화 모듈 | pre_tool_guard(큰 출력 차단) + loop_budget(카테고리별 예산) + file_deduper(중복 읽기 차단) + compact_override(컴팩션 프롬프트) | 활성 (token_optimizer_enabled=true 시, .opencode/harness.jsonc에서 5개 토글로 제어) |
+| Token Opt. v0.5→v1 | 토큰 최적화 모듈 | pre_tool_guard(큰 출력 차단) + loop_budget(카테고리별 예산) + file_deduper(중복 읽기 차단) + compact_override(컴팩션 프롬프트) + **v0.5→v1: metrics collection(session.idle 4개 지표 자동 산출 → token-optimizer-metrics.jsonl), recommendation engine(3-세션 규칙 기반 권장 출력), configurable thresholds(budget_limits_*, file_deduper_threshold, git_log_session_limit)** | 활성 (token_optimizer_enabled=true 시, .opencode/harness.jsonc에서 토글로 제어) |
 
 ---
 

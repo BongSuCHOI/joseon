@@ -87,3 +87,14 @@ export const COMPACT_OVERRIDE_PROMPT = `## Compaction Directive
 
 /** File deduper: read count threshold before checking mtime/size */
 export const FILE_DEDUPER_THRESHOLD = 3;
+
+// ─── Token Optimizer v0.5 metrics constants ─────────────
+
+/** Metrics file name (under project harness dir) */
+export const TOKEN_OPTIMIZER_METRICS_FILE = 'token-optimizer-metrics.jsonl';
+
+/** Max metrics file size before rotation (1MB) */
+export const METRICS_MAX_BYTES = 1048576;
+
+/** How many recent sessions to analyze for recommendations */
+export const METRICS_RECOMMENDATION_WINDOW = 10;

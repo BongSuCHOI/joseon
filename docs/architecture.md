@@ -21,7 +21,7 @@
 | 5a~5h | Shadow/Guarded-Off 인프라 | canary + ack plane + candidate grouping | ✅ 완료 (전부 활성화 — .opencode/harness.jsonc에서 토글 ON) |
 | Token Opt. | 토큰 최적화 | Observer 낭비 탐지기(3개) + Memory Recall 3계층 공개 + Fact TTL/접근 추적 | ✅ 완료 |
 | Mem v3.2 Phase 1a | 파일 기반 의미론 | Promotion Control + Hot Context + Boundary Hint + Contradiction Surfacing + 안전 퓨즈 확장 + 메트릭 | ✅ 완료 (default-off, .opencode/harness.jsonc에서 4개 토글) |
-| Token Opt. v0 | 토큰 최적화 모듈 | pre_tool_guard + loop_budget + file_deduper + compact_override | ✅ 완료 (default-off, .opencode/harness.jsonc에서 token_optimizer_enabled로 활성화) |
+| Token Opt. v0.5/v1 | 토큰 최적화 메트릭 | 세션 메트릭 수집 + 3-세션 규칙 권장 엔진 + 설정 가능 임계값 | ✅ 완료 (default-off, .opencode/harness.jsonc에서 token_optimizer_enabled로 활성화) |
 
 ---
 
@@ -68,6 +68,8 @@ Observer는 L1(관측)과 L2(신호 변환)를 담당하는 하네스의 첫 번
 Observer의 `tool.execute.after` 훅에서 프록시 메트릭(툴 호출 횟수, 반복 패턴)을 기반으로 토큰 낭비 패턴을 감지한다. OpenCode API에서 실제 토큰 수를 알 수 없으므로 프록시 메트릭을 사용한다. 3개 탐지기 모두 인메모리 Map으로 세션별 추적하며, `session.created`/`session.deleted`에서 자동 초기화된다.
 
 **Token Optimizer v0 — loop_budget + file_deduper:** Observer의 `tool.execute.before` 훅에서 도구 유형별 세션 예산 초과 시 차단(loop_budget)과 같은 파일 반복 읽기 차단(file_deduper)을 수행한다. loop_budget은 5개 카테고리(search/read/test/write/other)별로 세션 전체 호출 수를 추적하여 한계 도달 시 `throw Error()`로 차단한다. file_deduper는 파일 읽기 3회까지는 카운트만 하고, 4회부터 `mtimeMs:size` 핑거프린트로 파일 변경 여부를 확인하여 변경 없으면 차단한다. 두 기능 모두 `token_optimizer_enabled` 마스터 토글이 켜져 있을 때만 동작한다.
+
+**Token Optimizer v0.5/v1 — 세션 메트릭 수집 + 권장 엔진:** `token-metrics-tracker.ts`에서 세션별 토큰 사용 메트릭을 수집하고, 3-세션 규칙으로 패턴을 분석하여 권장 사항을 생성한다. v0에서는 임계값이 모두 하드코딩되었으나, v1에서는 `budget_limits_search/read/test/write/other`, `file_deduper_threshold`, `git_log_session_limit`을 `harness.jsonc`에서 설정할 수 있다. `session.idle` 훅에서 `collectSessionMetrics()`가 메트릭을 수집하여 `token-optimizer-metrics.jsonl`에 기록하고, 3세분 누적 시 `analyzeAndRecommend()`가 패턴을 분석하여 권장 임계값을 제안한다.
 
 **세션 락:** `session.created`에서 PID 파일로 동일 프로젝트의 동시 세션을 차단한다.
 
@@ -338,7 +340,7 @@ Step 5a~5h의 모든 기능은 다음 4가지 원칙을 따른다:
 - **FallbackChain:** 모델 배열로 자동 폴백 지원
 - **Token 최적화 설정:** `tool_loop_threshold`(5), `retry_storm_threshold`(3), `excessive_read_threshold`(4), `fact_ttl_days`(30), `fact_ttl_extend_threshold`(5)
 - **Phase 1a 메모리 의미론:** `hot_context_enabled`(false), `rich_fact_metadata_enabled`(false), `confidence_threshold_active`(0.7), `boundary_hint_enabled`(false), `gate_a_monitoring_enabled`(false) — 모두 default-off
-- **Token Optimizer v0:** `token_optimizer_enabled`(false), `pre_tool_guard_enabled`(true), `loop_budget_enabled`(true), `file_deduper_enabled`(true), `compact_override_enabled`(true) — 마스터 토글 1개 + 기능별 토글 4개. 임계값은 모두 하드코딩
+- **Token Optimizer v0.5/v1:** `token_optimizer_enabled`(false), `pre_tool_guard_enabled`(true), `loop_budget_enabled`(true), `file_deduper_enabled`(true), `compact_override_enabled`(true) — 마스터 토글 1개 + 기능별 토글 4개. v1부터 임계값이 `harness.jsonc`에서 설정 가능: `budget_limits_search`(30)/`budget_limits_read`(50)/`budget_limits_test`(20)/`budget_limits_write`(40)/`budget_limits_other`(20), `file_deduper_threshold`(3), `git_log_session_limit`(1)
 
 ---
 
@@ -380,7 +382,8 @@ src/
 │   ├── observer.ts           # L1 관측 + L2 신호 변환
 │   ├── enforcer.ts           # L4 HARD 차단 + SOFT 위반 추적
 │   ├── improver.ts           # L5 자가개선 + L6 폐루프
-│   └── canary.ts             # canary 평가 (shadow + mismatch)
+│   ├── canary.ts             # canary 평가 (shadow + mismatch)
+│   └── token-metrics-tracker.ts # v0.5 세션 메트릭 수집 + 권장 엔진
 ├── orchestrator/             # 오케스트레이션 레이어
 │   ├── orchestrator.ts       # 최상위 라우터
 │   ├── qa-tracker.ts         # QA 실패 추적
@@ -417,7 +420,8 @@ src/
 │       ├── hot-context.json  # Phase 1a: 세션 간 컨텍스트 캐시 (hot_context_enabled)
 │       ├── memory-metrics.jsonl  # Phase 1a: 메모리 성능 메트릭 (항상 수집)
 │       ├── gate-a-status.json  # Gate A 자동 평가 상태 (gate_a_monitoring_enabled)
-│       └── gate-a-alerts.jsonl  # Gate A 1회성 알림 로그
+│       ├── gate-a-alerts.jsonl  # Gate A 1회성 알림 로그
+│       └── token-optimizer-metrics.jsonl  # v0.5: 세션별 토큰 메트릭 + 권장 기록
 ├── events.jsonl              # 이벤트 로그
 └── logs/sessions/            # 세션 로그 / fact extraction source
 ```

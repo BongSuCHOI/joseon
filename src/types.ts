@@ -395,3 +395,24 @@ export interface DangerPattern {
     alternative: string;
     label: string;
 }
+
+// ─── Token Optimizer v0.5 metrics types ─────────────────
+
+export interface TokenOptimizerMetricsRecord {
+    ts: string;
+    session_id: string;
+    project_key: string;
+    // Per-feature block/pass counts
+    pre_tool_guard_blocks: number;
+    pre_tool_guard_passes: number;
+    loop_budget_blocks: number;
+    loop_budget_passes: number;
+    file_deduper_blocks: number;
+    file_deduper_passes: number;
+    // Category budget usage
+    budget_usage: Partial<Record<ToolCategory, { used: number; limit: number }>>;
+    budget_exhaustions: ToolCategory[];
+    // Derived metrics
+    block_rate: number;                  // total blocks / (blocks + passes), 0 if no calls
+    retry_after_block_rate: number;      // retries / total blocks, 0 if no blocks
+}
